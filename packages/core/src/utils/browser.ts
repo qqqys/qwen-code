@@ -21,8 +21,8 @@ export function shouldAttemptBrowserLaunch(): boolean {
   }
   // Common environment variables used in CI/CD or other non-interactive shells.
   if (
-    process.env['CI'] ||
-    process.env['DEBIAN_FRONTEND'] === 'noninteractive'
+    (process.env['CI'] || process.env['DEBIAN_FRONTEND'] === 'noninteractive',
+    process.env['NO_BROWSER'] === 'true')
   ) {
     return false;
   }
