@@ -12,6 +12,7 @@ import {
   CHAT_VIEW_ID_SIDEBAR,
   CHAT_VIEW_ID_SECONDARY,
 } from '../constants/viewIds.js';
+import { AboutPanel } from '../webview/AboutPanel.js';
 
 type Logger = (message: string) => void;
 
@@ -23,6 +24,7 @@ export const loginCommand = 'qwen-code.login';
 export const focusChatCommand = 'qwen-code.focusChat';
 export const newConversationCommand = 'qwen-code.newConversation';
 export const showLogsCommand = 'qwen-code.showLogs';
+export const showStatusCommand = 'qwen-code.showStatus';
 
 /**
  * Register all Qwen Code chat-related commands.
@@ -47,6 +49,12 @@ export function registerNewCommands(
   outputChannel?: vscode.OutputChannel,
   supportsSecondarySidebar = true,
 ): void {
+  // Show Status: open the about/status WebView panel
+  context.subscriptions.push(
+    vscode.commands.registerCommand(showStatusCommand, () => {
+      AboutPanel.createOrShow(context);
+    }),
+  );
   const disposables: vscode.Disposable[] = [];
 
   // Open Chat: show the most recent editor tab or create a new one

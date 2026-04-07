@@ -5,6 +5,7 @@
  */
 
 import * as vscode from 'vscode';
+import * as os from 'os';
 import { BaseMessageHandler } from './BaseMessageHandler.js';
 import type { ChatMessage } from '../../services/qwenAgentManager.js';
 import type { ImageAttachment } from '../../utils/imageSupport.js';
@@ -271,6 +272,71 @@ export class SessionMessageHandler extends BaseMessageHandler {
   /**
    * Handle send message request
    */
+  /**
+   * Handle the /status (or /about) command locally.
+   * Collects system info and sends it to the webview as a streamed assistant message.
+   */
+  private async handleStatusCommand(): Promise<void> {
+    const ext = vscode.extensions.getExtension(
+      'qwenlm.qwen-code-vscode-ide-companion',
+    );
+    const extVersion: string = ext?.packageJSON?.version ?? 'unknown';
+    const platform = `${os.platform()} ${os.arch()} (${os.release()})`;
+    const totalMem = (os.totalmem() / 1024 / 1024 / 1024).toFixed(1) + ' GB';
+    const freeMem = (os.freemem() / 1024 / 1024 / 1024).toFixed(1) + ' GB';
+    const workspaceFolders =
+      vscode.workspace.workspaceFolders?.map((f) => f.uri.fsPath).join('\n') ??
+      '(no workspace)';
+    const sandboxEnv = process.env['SANDBOX'] ?? 'no sandbox';
+
+    const content = [
+      '### Qwen Code Status',
+      '',
+      `| Item | Value |`,
+      `|------|-------|`,
+      `| Extension Version | \`${extVersion}\` |`,
+      `| VS Code Version | \`${vscode.version}\` |`,
+      `| Node.js Version | \`${process.version}\` |`,
+      `| Platform | \`${platform}\` |`,
+      `| Total Memory | ${totalMem} |`,
+      `| Free Memory | ${freeMem} |`,
+      `| Sandbox | ${sandboxEnv} |`,
+      `| Workspace | ${workspaceFolders.replace(/\n/g, '<br>') || '(none)'} |`,
+    ].join('\n');
+
+    this.requestCounter += 1;
+    this.currentRequestId = `req-${this.requestCounter}-${Date.now()}`;
+    this.streamEndSent = false;
+    const myRequestId = this.currentRequestId;
+
+    this.sendToWebView({
+      type: 'streamStart',
+      data: { timestamp: Date.now(), requestId: myRequestId },
+    });
+
+    this.resetStreamContent();
+    this.appendStreamContent(content);
+
+    this.sendToWebView({
+      type: 'streamChunk',
+      data: { chunk: content },
+    });
+
+    if (this.currentConversationId) {
+      const assistantMessage: ChatMessage = {
+        role: 'assistant',
+        content,
+        timestamp: Date.now(),
+      };
+      await this.conversationStore.addMessage(
+        this.currentConversationId,
+        assistantMessage,
+      );
+    }
+
+    this.sendStreamEnd(undefined, myRequestId);
+  }
+
   private async handleSendMessage(
     text: string,
     context?: Array<{
@@ -415,6 +481,12 @@ export class SessionMessageHandler extends BaseMessageHandler {
       type: 'message',
       data: { ...userMessage, fileContext },
     });
+
+    // Handle /status command locally without going through ACP
+    if (trimmedText === '/status' || trimmedText === '/about') {
+      await this.handleStatusCommand();
+      return;
+    }
 
     // Check if agent is connected
     if (!this.agentManager.isConnected) {

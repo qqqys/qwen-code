@@ -34,7 +34,8 @@
     "onCommand:qwen-code.openChat",
     "onCommand:qwen-code.focusChat",
     "onCommand:qwen-code.newConversation",
-    "onCommand:qwen-code.showLogs"
+    "onCommand:qwen-code.showLogs",
+    "onCommand:qwen-code.showStatus"
   ],
   "contributes": {
     "jsonValidation": [
@@ -125,6 +126,10 @@
       {
         "command": "qwen-code.showLogs",
         "title": "Qwen Code: Show Logs"
+      },
+      {
+        "command": "qwen-code.showStatus",
+        "title": "Qwen Code: Show Status"
       }
     ],
     "menus": {
