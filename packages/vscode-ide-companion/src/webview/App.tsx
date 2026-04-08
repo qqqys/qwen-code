@@ -951,7 +951,6 @@ export const App: React.FC = () => {
         isLoading={sessionManagement.isLoading}
         onLoadMore={sessionManagement.handleLoadMoreSessions}
         onRenameSession={sessionManagement.handleRenameSession}
-        onDeleteSession={sessionManagement.handleDeleteSession}
       />
 
       <ChatHeader

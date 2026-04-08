@@ -969,31 +969,6 @@ export const useWebViewMessages = ({
           break;
         }
 
-        case 'sessionDeleted': {
-          const deletedSessionId = message.data?.sessionId as string;
-          if (deletedSessionId) {
-            // Remove the session from the local list
-            handlers.sessionManagement.setQwenSessions(
-              (prev: Array<Record<string, unknown>>) =>
-                prev.filter(
-                  (s) =>
-                    (s.id as string) !== deletedSessionId &&
-                    (s.sessionId as string) !== deletedSessionId,
-                ),
-            );
-            // If the deleted session was the current one, reset to default
-            if (
-              deletedSessionId === handlers.sessionManagement.currentSessionId
-            ) {
-              handlers.sessionManagement.setCurrentSessionId(null);
-              handlers.sessionManagement.setCurrentSessionTitle(
-                'Past Conversations',
-              );
-            }
-          }
-          break;
-        }
-
         case 'activeEditorChanged': {
           const fileName = message.data?.fileName as string | null;
           const filePath = message.data?.filePath as string | null;

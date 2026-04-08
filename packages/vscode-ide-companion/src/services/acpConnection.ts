@@ -579,25 +579,6 @@ export class AcpConnection {
     return res;
   }
 
-  async deleteSession(
-    sessionId: string,
-    cwd?: string,
-  ): Promise<{ success: boolean }> {
-    const conn = this.ensureConnection();
-    console.log('[ACP] Sending session/delete for:', sessionId);
-    try {
-      const res = await conn.extMethod('session/delete', {
-        sessionId,
-        cwd: cwd || this.workingDir,
-      });
-      console.log('[ACP] session/delete response:', res);
-      return res as { success: boolean };
-    } catch (error) {
-      console.error('[ACP] session/delete failed:', error);
-      throw error;
-    }
-  }
-
   disconnect(): void {
     if (this.child) {
       this.child.kill();

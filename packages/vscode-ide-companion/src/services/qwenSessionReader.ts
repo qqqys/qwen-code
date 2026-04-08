@@ -402,45 +402,13 @@ export class QwenSessionReader {
   }
 
   /**
-   * Delete session file.
-   * First tries to find the file by name pattern across all project dirs,
-   * then falls back to a full content scan.
+   * Delete session file
    */
   async deleteSession(
     sessionId: string,
     _workingDir: string,
   ): Promise<boolean> {
     try {
-      // Try direct file path lookup by session ID across all projects
-      const tmpDir = path.join(this.qwenDir, 'tmp');
-      if (fs.existsSync(tmpDir)) {
-        const projectDirs = fs.readdirSync(tmpDir);
-        for (const projectHash of projectDirs) {
-          const chatsDir = path.join(tmpDir, projectHash, 'chats');
-          if (!fs.existsSync(chatsDir)) {
-            continue;
-          }
-          // JSONL format: {sessionId}.jsonl
-          const jsonlPath = path.join(chatsDir, `${sessionId}.jsonl`);
-          if (fs.existsSync(jsonlPath)) {
-            fs.unlinkSync(jsonlPath);
-            console.log(
-              '[QwenSessionReader] Deleted JSONL session:',
-              jsonlPath,
-            );
-            return true;
-          }
-          // JSON format: session-{sessionId}.json
-          const jsonPath = path.join(chatsDir, `session-${sessionId}.json`);
-          if (fs.existsSync(jsonPath)) {
-            fs.unlinkSync(jsonPath);
-            console.log('[QwenSessionReader] Deleted JSON session:', jsonPath);
-            return true;
-          }
-        }
-      }
-
-      // Fallback: full content scan (handles mismatched file names)
       const session = await this.getSession(sessionId, _workingDir);
       if (session && session.filePath) {
         fs.unlinkSync(session.filePath);

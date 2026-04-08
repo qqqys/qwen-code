@@ -119,19 +119,6 @@ export const useSessionManagement = (vscode: VSCodeAPI) => {
     [vscode],
   );
 
-  /**
-   * Delete session
-   */
-  const handleDeleteSession = useCallback(
-    (sessionId: string) => {
-      vscode.postMessage({
-        type: 'deleteSession',
-        data: { sessionId },
-      });
-    },
-    [vscode],
-  );
-
   return {
     // State
     qwenSessions,
@@ -160,6 +147,5 @@ export const useSessionManagement = (vscode: VSCodeAPI) => {
     handleSwitchSession,
     handleLoadMoreSessions,
     handleRenameSession,
-    handleDeleteSession,
   };
 };

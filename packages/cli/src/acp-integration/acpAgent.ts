@@ -368,27 +368,8 @@ class QwenAgent implements Agent {
 
   async extMethod(
     method: string,
-    params: Record<string, unknown>,
+    _params: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
-    if (method === 'session/delete') {
-      const { sessionId, cwd: paramCwd } = params as {
-        sessionId: string;
-        cwd?: string;
-      };
-      if (!sessionId) {
-        throw RequestError.invalidParams(undefined, 'sessionId is required');
-      }
-      const cwd = (paramCwd as string) || process.cwd();
-      const success = await runWithAcpRuntimeOutputDir(
-        this.settings,
-        cwd,
-        async () => {
-          const sessionService = new SessionService(cwd);
-          return sessionService.removeSession(sessionId);
-        },
-      );
-      return { success };
-    }
     throw RequestError.methodNotFound(method);
   }
 
