@@ -7,13 +7,14 @@
  * Displays sessions grouped by date with search and infinite scroll
  */
 
-import type { FC } from 'react';
-import { Fragment } from 'react';
+import type { FC, KeyboardEvent, MouseEvent } from 'react';
+import { Fragment, useState, useRef, useEffect } from 'react';
 import {
   getTimeAgo,
   groupSessionsByDate,
 } from '../../utils/sessionGrouping.js';
 import { SearchIcon } from '../icons/NavigationIcons.js';
+import { EditPencilIcon, TrashIcon } from '../icons/EditIcons.js';
 
 /**
  * Props for SessionSelector component
@@ -39,6 +40,10 @@ export interface SessionSelectorProps {
   isLoading?: boolean;
   /** Callback to load more sessions */
   onLoadMore?: () => void;
+  /** Callback when a session is renamed */
+  onRenameSession?: (sessionId: string, newTitle: string) => void;
+  /** Callback when a session is deleted */
+  onDeleteSession?: (sessionId: string) => void;
 }
 
 /**
@@ -75,12 +80,62 @@ export const SessionSelector: FC<SessionSelectorProps> = ({
   hasMore = false,
   isLoading = false,
   onLoadMore,
+  onRenameSession,
+  onDeleteSession,
 }) => {
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState('');
+  const editInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (editingSessionId && editInputRef.current) {
+      editInputRef.current.focus();
+      editInputRef.current.select();
+    }
+  }, [editingSessionId]);
+
+  useEffect(() => {
+    if (!visible) {
+      setEditingSessionId(null);
+    }
+  }, [visible]);
+
   if (!visible) {
     return null;
   }
 
   const hasNoSessions = sessions.length === 0;
+
+  const startEditing = (
+    sessionId: string,
+    currentTitle: string,
+    e: MouseEvent,
+  ) => {
+    e.stopPropagation();
+    setEditingSessionId(sessionId);
+    setEditingTitle(currentTitle);
+  };
+
+  const commitRename = () => {
+    if (editingSessionId && editingTitle.trim() && onRenameSession) {
+      onRenameSession(editingSessionId, editingTitle.trim());
+    }
+    setEditingSessionId(null);
+  };
+
+  const cancelEditing = () => {
+    setEditingSessionId(null);
+  };
+
+  const handleEditKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      commitRename();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      cancelEditing();
+    }
+  };
 
   return (
     <>
@@ -154,28 +209,75 @@ export const SessionSelector: FC<SessionSelectorProps> = ({
                       (session.startTime as string) ||
                       '';
                     const isActive = sessionId === currentSessionId;
+                    const isEditing = editingSessionId === sessionId;
 
                     return (
-                      <button
+                      <div
                         key={sessionId}
-                        type="button"
-                        className={`session-item flex items-center justify-between py-1.5 px-2 bg-transparent border-none rounded-md cursor-pointer text-left w-full text-[var(--vscode-chat-font-size,13px)] font-[var(--vscode-chat-font-family)] text-[var(--app-primary-foreground)] transition-colors duration-100 hover:bg-[var(--app-list-hover-background)] ${
+                        className={`session-item group flex items-center justify-between py-1.5 px-2 rounded-md w-full text-[var(--vscode-chat-font-size,13px)] font-[var(--vscode-chat-font-family)] text-[var(--app-primary-foreground)] transition-colors duration-100 hover:bg-[var(--app-list-hover-background)] ${
                           isActive
                             ? 'active bg-[var(--app-list-active-background)] text-[var(--app-list-active-foreground)] font-[600]'
                             : ''
                         }`}
-                        onClick={() => {
-                          onSelectSession(sessionId);
-                          onClose();
-                        }}
                       >
-                        <span className="session-item-title flex-1 overflow-hidden text-ellipsis whitespace-nowrap min-w-0">
-                          {title}
-                        </span>
-                        <span className="session-item-time opacity-60 text-[0.9em] flex-shrink-0 ml-3">
-                          {getTimeAgo(lastUpdated)}
-                        </span>
-                      </button>
+                        {isEditing ? (
+                          <input
+                            ref={editInputRef}
+                            type="text"
+                            className="flex-1 bg-[var(--vscode-input-background)] text-[var(--vscode-input-foreground)] border border-[var(--vscode-input-border)] rounded px-1 py-0.5 text-[var(--vscode-chat-font-size,13px)] font-[var(--vscode-chat-font-family)] outline-none min-w-0"
+                            value={editingTitle}
+                            onChange={(e) => setEditingTitle(e.target.value)}
+                            onKeyDown={handleEditKeyDown}
+                            onBlur={commitRename}
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                        ) : (
+                          <button
+                            type="button"
+                            className="flex-1 flex items-center bg-transparent border-none cursor-pointer text-left text-[var(--vscode-chat-font-size,13px)] font-[var(--vscode-chat-font-family)] text-[var(--app-primary-foreground)] min-w-0 p-0"
+                            onClick={() => {
+                              onSelectSession(sessionId);
+                              onClose();
+                            }}
+                          >
+                            <span className="session-item-title flex-1 overflow-hidden text-ellipsis whitespace-nowrap min-w-0">
+                              {title}
+                            </span>
+                          </button>
+                        )}
+                        {!isEditing && (
+                          <div className="flex items-center flex-shrink-0 ml-2 gap-1">
+                            {onRenameSession && (
+                              <button
+                                type="button"
+                                className="session-rename-btn opacity-0 group-hover:opacity-60 hover:!opacity-100 bg-transparent border-none cursor-pointer p-0.5 rounded text-[var(--app-primary-foreground)] transition-opacity duration-100"
+                                title="Rename session"
+                                onClick={(e) =>
+                                  startEditing(sessionId, title, e)
+                                }
+                              >
+                                <EditPencilIcon size={12} />
+                              </button>
+                            )}
+                            {onDeleteSession && !isActive && (
+                              <button
+                                type="button"
+                                className="session-delete-btn opacity-0 group-hover:opacity-60 hover:!opacity-100 bg-transparent border-none cursor-pointer p-0.5 rounded text-[var(--app-primary-foreground)] transition-opacity duration-100"
+                                title="Delete session"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onDeleteSession(sessionId);
+                                }}
+                              >
+                                <TrashIcon size={12} />
+                              </button>
+                            )}
+                            <span className="session-item-time opacity-60 text-[0.9em]">
+                              {getTimeAgo(lastUpdated)}
+                            </span>
+                          </div>
+                        )}
+                      </div>
                     );
                   })}
                 </div>

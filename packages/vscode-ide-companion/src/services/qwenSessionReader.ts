@@ -41,9 +41,72 @@ export interface QwenSession {
 
 export class QwenSessionReader {
   private qwenDir: string;
-
+  private customTitlesCache: Map<string, string> | null = null;
   constructor() {
     this.qwenDir = path.join(os.homedir(), '.qwen');
+  }
+
+  private getCustomTitlesPath(): string {
+    return path.join(this.qwenDir, 'session-titles.json');
+  }
+
+  loadCustomTitles(): Map<string, string> {
+    if (this.customTitlesCache !== null) {
+      return this.customTitlesCache;
+    }
+    try {
+      const p = this.getCustomTitlesPath();
+      if (fs.existsSync(p)) {
+        const data = JSON.parse(fs.readFileSync(p, 'utf-8')) as Record<
+          string,
+          string
+        >;
+        this.customTitlesCache = new Map(Object.entries(data));
+      } else {
+        this.customTitlesCache = new Map();
+      }
+    } catch {
+      this.customTitlesCache = new Map();
+    }
+    return this.customTitlesCache;
+  }
+
+  saveCustomTitle(sessionId: string, title: string): void {
+    try {
+      const p = this.getCustomTitlesPath();
+      const existing: Record<string, string> = fs.existsSync(p)
+        ? (JSON.parse(fs.readFileSync(p, 'utf-8')) as Record<string, string>)
+        : {};
+      existing[sessionId] = title;
+      fs.writeFileSync(p, JSON.stringify(existing, null, 2), 'utf-8');
+      this.customTitlesCache = null;
+    } catch (error) {
+      console.error('[QwenSessionReader] Failed to save custom title:', error);
+      throw error;
+    }
+  }
+
+  removeCustomTitle(sessionId: string): void {
+    try {
+      const p = this.getCustomTitlesPath();
+      if (!fs.existsSync(p)) {
+        return;
+      }
+      const existing = JSON.parse(fs.readFileSync(p, 'utf-8')) as Record<
+        string,
+        string
+      >;
+      if (sessionId in existing) {
+        delete existing[sessionId];
+        fs.writeFileSync(p, JSON.stringify(existing, null, 2), 'utf-8');
+        this.customTitlesCache = null;
+      }
+    } catch (error) {
+      console.error(
+        '[QwenSessionReader] Failed to remove custom title:',
+        error,
+      );
+    }
   }
 
   /**
@@ -178,9 +241,16 @@ export class QwenSessionReader {
   }
 
   /**
-   * Get session title (based on first user message)
+   * Get session title (custom title takes precedence over first user message)
    */
   getSessionTitle(session: QwenSession): string {
+    // Custom title has highest priority
+    const customTitles = this.loadCustomTitles();
+    const customTitle = customTitles.get(session.sessionId);
+    if (customTitle) {
+      return customTitle;
+    }
+
     // Prefer cached prompt text to avoid loading messages for JSONL sessions
     if (session.firstUserText) {
       return (
@@ -332,13 +402,45 @@ export class QwenSessionReader {
   }
 
   /**
-   * Delete session file
+   * Delete session file.
+   * First tries to find the file by name pattern across all project dirs,
+   * then falls back to a full content scan.
    */
   async deleteSession(
     sessionId: string,
     _workingDir: string,
   ): Promise<boolean> {
     try {
+      // Try direct file path lookup by session ID across all projects
+      const tmpDir = path.join(this.qwenDir, 'tmp');
+      if (fs.existsSync(tmpDir)) {
+        const projectDirs = fs.readdirSync(tmpDir);
+        for (const projectHash of projectDirs) {
+          const chatsDir = path.join(tmpDir, projectHash, 'chats');
+          if (!fs.existsSync(chatsDir)) {
+            continue;
+          }
+          // JSONL format: {sessionId}.jsonl
+          const jsonlPath = path.join(chatsDir, `${sessionId}.jsonl`);
+          if (fs.existsSync(jsonlPath)) {
+            fs.unlinkSync(jsonlPath);
+            console.log(
+              '[QwenSessionReader] Deleted JSONL session:',
+              jsonlPath,
+            );
+            return true;
+          }
+          // JSON format: session-{sessionId}.json
+          const jsonPath = path.join(chatsDir, `session-${sessionId}.json`);
+          if (fs.existsSync(jsonPath)) {
+            fs.unlinkSync(jsonPath);
+            console.log('[QwenSessionReader] Deleted JSON session:', jsonPath);
+            return true;
+          }
+        }
+      }
+
+      // Fallback: full content scan (handles mismatched file names)
       const session = await this.getSession(sessionId, _workingDir);
       if (session && session.filePath) {
         fs.unlinkSync(session.filePath);

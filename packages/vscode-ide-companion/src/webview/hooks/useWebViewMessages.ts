@@ -941,6 +941,59 @@ export const useWebViewMessages = ({
           break;
         }
 
+        case 'sessionRenamed': {
+          const renamedSessionId = message.data?.sessionId as string;
+          const newTitle = message.data?.newTitle as string;
+          if (renamedSessionId && newTitle) {
+            // Update the session title in the local session list
+            handlers.sessionManagement.setQwenSessions(
+              (prev: Array<Record<string, unknown>>) =>
+                prev.map((s) =>
+                  (s.id as string) === renamedSessionId ||
+                  (s.sessionId as string) === renamedSessionId
+                    ? { ...s, title: newTitle, name: newTitle }
+                    : s,
+                ),
+            );
+            // If this is the current session, update the header title too
+            if (
+              renamedSessionId === handlers.sessionManagement.currentSessionId
+            ) {
+              handlers.sessionManagement.setCurrentSessionTitle(newTitle);
+              vscode.postMessage({
+                type: 'updatePanelTitle',
+                data: { title: newTitle },
+              });
+            }
+          }
+          break;
+        }
+
+        case 'sessionDeleted': {
+          const deletedSessionId = message.data?.sessionId as string;
+          if (deletedSessionId) {
+            // Remove the session from the local list
+            handlers.sessionManagement.setQwenSessions(
+              (prev: Array<Record<string, unknown>>) =>
+                prev.filter(
+                  (s) =>
+                    (s.id as string) !== deletedSessionId &&
+                    (s.sessionId as string) !== deletedSessionId,
+                ),
+            );
+            // If the deleted session was the current one, reset to default
+            if (
+              deletedSessionId === handlers.sessionManagement.currentSessionId
+            ) {
+              handlers.sessionManagement.setCurrentSessionId(null);
+              handlers.sessionManagement.setCurrentSessionTitle(
+                'Past Conversations',
+              );
+            }
+          }
+          break;
+        }
+
         case 'activeEditorChanged': {
           const fileName = message.data?.fileName as string | null;
           const filePath = message.data?.filePath as string | null;

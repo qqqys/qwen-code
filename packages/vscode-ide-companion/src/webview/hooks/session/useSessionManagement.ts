@@ -106,6 +106,32 @@ export const useSessionManagement = (vscode: VSCodeAPI) => {
     [currentSessionId, vscode],
   );
 
+  /**
+   * Rename session
+   */
+  const handleRenameSession = useCallback(
+    (sessionId: string, newTitle: string) => {
+      vscode.postMessage({
+        type: 'renameSession',
+        data: { sessionId, newTitle },
+      });
+    },
+    [vscode],
+  );
+
+  /**
+   * Delete session
+   */
+  const handleDeleteSession = useCallback(
+    (sessionId: string) => {
+      vscode.postMessage({
+        type: 'deleteSession',
+        data: { sessionId },
+      });
+    },
+    [vscode],
+  );
+
   return {
     // State
     qwenSessions,
@@ -133,5 +159,7 @@ export const useSessionManagement = (vscode: VSCodeAPI) => {
     handleNewQwenSession,
     handleSwitchSession,
     handleLoadMoreSessions,
+    handleRenameSession,
+    handleDeleteSession,
   };
 };

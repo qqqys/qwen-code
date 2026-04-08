@@ -950,6 +950,8 @@ export const App: React.FC = () => {
         hasMore={sessionManagement.hasMore}
         isLoading={sessionManagement.isLoading}
         onLoadMore={sessionManagement.handleLoadMoreSessions}
+        onRenameSession={sessionManagement.handleRenameSession}
+        onDeleteSession={sessionManagement.handleDeleteSession}
       />
 
       <ChatHeader

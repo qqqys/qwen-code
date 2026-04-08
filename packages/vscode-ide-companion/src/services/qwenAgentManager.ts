@@ -483,18 +483,26 @@ export class QwenAgentManager {
         items.length,
       );
       if (items.length > 0) {
-        const sessions = items.map((item) => ({
-          id: item.sessionId || item.id,
-          sessionId: item.sessionId || item.id,
-          title: item.title || item.name || item.prompt || 'Untitled Session',
-          name: item.title || item.name || item.prompt || 'Untitled Session',
-          startTime: item.startTime,
-          lastUpdated: item.updatedAt || item.mtime || item.lastUpdated,
-          messageCount: item.messageCount || 0,
-          projectHash: item.projectHash,
-          filePath: item.filePath,
-          cwd: item.cwd,
-        }));
+        const customTitles = this.sessionReader.loadCustomTitles();
+        const sessions = items.map((item) => {
+          const id = item.sessionId || item.id;
+          const idStr = typeof id === 'string' ? id : String(id ?? '');
+          const defaultTitle =
+            item.title || item.name || item.prompt || 'Untitled Session';
+          const title = customTitles.get(idStr) || defaultTitle;
+          return {
+            id,
+            sessionId: id,
+            title,
+            name: title,
+            startTime: item.startTime,
+            lastUpdated: item.updatedAt || item.mtime || item.lastUpdated,
+            messageCount: item.messageCount || 0,
+            projectHash: item.projectHash,
+            filePath: item.filePath,
+            cwd: item.cwd,
+          };
+        });
 
         console.log(
           '[QwenAgentManager] Sessions retrieved via ACP:',
@@ -571,18 +579,26 @@ export class QwenAgentManager {
       const res: unknown = response;
       const items = extractSessionListItems(res);
 
-      const mapped = items.map((item) => ({
-        id: item.sessionId || item.id,
-        sessionId: item.sessionId || item.id,
-        title: item.title || item.name || item.prompt || 'Untitled Session',
-        name: item.title || item.name || item.prompt || 'Untitled Session',
-        startTime: item.startTime,
-        lastUpdated: item.updatedAt || item.mtime || item.lastUpdated,
-        messageCount: item.messageCount || 0,
-        projectHash: item.projectHash,
-        filePath: item.filePath,
-        cwd: item.cwd,
-      }));
+      const customTitles = this.sessionReader.loadCustomTitles();
+      const mapped = items.map((item) => {
+        const id = item.sessionId || item.id;
+        const idStr = typeof id === 'string' ? id : String(id ?? '');
+        const defaultTitle =
+          item.title || item.name || item.prompt || 'Untitled Session';
+        const title = customTitles.get(idStr) || defaultTitle;
+        return {
+          id,
+          sessionId: id,
+          title,
+          name: title,
+          startTime: item.startTime,
+          lastUpdated: item.updatedAt || item.mtime || item.lastUpdated,
+          messageCount: item.messageCount || 0,
+          projectHash: item.projectHash,
+          filePath: item.filePath,
+          cwd: item.cwd,
+        };
+      });
 
       // SDK returns nextCursor as string; convert to numeric cursor for paging
       let nextCursorNum: number | undefined;
@@ -641,6 +657,43 @@ export class QwenAgentManager {
       console.error('[QwenAgentManager] File system paged list failed:', error);
       return { sessions: [], hasMore: false };
     }
+  }
+
+  /**
+   * Rename a session by saving a custom title
+   *
+   * @param sessionId - Session ID to rename
+   * @param newTitle - New title for the session
+   */
+  async renameSession(sessionId: string, newTitle: string): Promise<void> {
+    this.sessionReader.saveCustomTitle(sessionId, newTitle);
+  }
+
+  /**
+   * Delete a session by removing its file and custom title
+   *
+   * @param sessionId - Session ID to delete
+   * @returns True if deleted successfully
+   */
+  async deleteSession(sessionId: string): Promise<void> {
+    // Try ACP delete first (uses SessionService.removeSession on the server)
+    try {
+      if (this.connection.isConnected) {
+        await this.connection.deleteSession(sessionId, this.currentWorkingDir);
+        this.sessionReader.removeCustomTitle(sessionId);
+        return;
+      }
+    } catch (error) {
+      console.warn(
+        '[QwenAgentManager] ACP session/delete failed, falling back to file system:',
+        error,
+      );
+    }
+
+    // Fallback: delete via file system
+    const workingDir = this.currentWorkingDir || process.cwd();
+    await this.sessionReader.deleteSession(sessionId, workingDir);
+    this.sessionReader.removeCustomTitle(sessionId);
   }
 
   /**
