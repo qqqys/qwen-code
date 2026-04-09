@@ -670,6 +670,33 @@ export class QwenAgentManager {
   }
 
   /**
+   * Delete a session by removing its file and custom title
+   *
+   * @param sessionId - Session ID to delete
+   * @returns True if deleted successfully
+   */
+  async deleteSession(sessionId: string): Promise<void> {
+    // Try ACP delete first (uses SessionService.removeSession on the server)
+    try {
+      if (this.connection.isConnected) {
+        await this.connection.deleteSession(sessionId, this.currentWorkingDir);
+        this.sessionReader.removeCustomTitle(sessionId);
+        return;
+      }
+    } catch (error) {
+      console.warn(
+        '[QwenAgentManager] ACP session/delete failed, falling back to file system:',
+        error,
+      );
+    }
+
+    // Fallback: delete via file system
+    const workingDir = this.currentWorkingDir || process.cwd();
+    await this.sessionReader.deleteSession(sessionId, workingDir);
+    this.sessionReader.removeCustomTitle(sessionId);
+  }
+
+  /**
    * Get session messages (read from disk)
    *
    * @param sessionId - Session ID

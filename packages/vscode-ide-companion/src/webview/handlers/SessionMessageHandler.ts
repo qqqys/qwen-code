@@ -39,6 +39,7 @@ export class SessionMessageHandler extends BaseMessageHandler {
       'setApprovalMode',
       'setModel',
       'renameSession',
+      'deleteSession',
     ].includes(messageType);
   }
 
@@ -147,6 +148,10 @@ export class SessionMessageHandler extends BaseMessageHandler {
           (data?.sessionId as string) || '',
           (data?.newTitle as string) || '',
         );
+        break;
+
+      case 'deleteSession':
+        await this.handleDeleteSession((data?.sessionId as string) || '');
         break;
 
       default:
@@ -1025,6 +1030,41 @@ export class SessionMessageHandler extends BaseMessageHandler {
       this.sendToWebView({
         type: 'error',
         data: { message: `Failed to set model: ${errorMsg}` },
+      });
+    }
+  }
+
+  /**
+   * Handle delete session request with confirmation dialog
+   */
+  private async handleDeleteSession(sessionId: string): Promise<void> {
+    try {
+      if (!sessionId) {
+        return;
+      }
+
+      // Prevent deleting the current active session
+      if (sessionId === this.agentManager.currentSessionId) {
+        this.sendToWebView({
+          type: 'error',
+          data: { message: 'Cannot delete the current active session' },
+        });
+        return;
+      }
+
+      await this.agentManager.deleteSession(sessionId);
+      // Always notify the frontend to remove from list,
+      // even if the file was already gone
+      this.sendToWebView({
+        type: 'sessionDeleted',
+        data: { sessionId },
+      });
+    } catch (error) {
+      console.error('[SessionMessageHandler] Failed to delete session:', error);
+      const errorMsg = this.getErrorMessage(error);
+      this.sendToWebView({
+        type: 'error',
+        data: { message: `Failed to delete session: ${errorMsg}` },
       });
     }
   }

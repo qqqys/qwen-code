@@ -14,7 +14,7 @@ import {
   groupSessionsByDate,
 } from '../../utils/sessionGrouping.js';
 import { SearchIcon } from '../icons/NavigationIcons.js';
-import { EditPencilIcon } from '../icons/EditIcons.js';
+import { EditPencilIcon, TrashIcon } from '../icons/EditIcons.js';
 
 /**
  * Props for SessionSelector component
@@ -42,6 +42,8 @@ export interface SessionSelectorProps {
   onLoadMore?: () => void;
   /** Callback when a session is renamed */
   onRenameSession?: (sessionId: string, newTitle: string) => void;
+  /** Callback when a session is deleted */
+  onDeleteSession?: (sessionId: string) => void;
 }
 
 /**
@@ -79,6 +81,7 @@ export const SessionSelector: FC<SessionSelectorProps> = ({
   isLoading = false,
   onLoadMore,
   onRenameSession,
+  onDeleteSession,
 }) => {
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
@@ -254,6 +257,19 @@ export const SessionSelector: FC<SessionSelectorProps> = ({
                                 }
                               >
                                 <EditPencilIcon size={12} />
+                              </button>
+                            )}
+                            {onDeleteSession && !isActive && (
+                              <button
+                                type="button"
+                                className="session-delete-btn opacity-0 group-hover:opacity-60 hover:!opacity-100 bg-transparent border-none cursor-pointer p-0.5 rounded text-[var(--app-primary-foreground)] transition-opacity duration-100"
+                                title="Delete session"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onDeleteSession(sessionId);
+                                }}
+                              >
+                                <TrashIcon size={12} />
                               </button>
                             )}
                             <span className="session-item-time opacity-60 text-[0.9em]">
