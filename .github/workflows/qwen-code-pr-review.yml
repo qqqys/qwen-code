@@ -40,7 +40,7 @@ jobs:
          github.event.review.author_association == 'MEMBER' ||
          github.event.review.author_association == 'COLLABORATOR'))
     timeout-minutes: 15
-    runs-on: self-hosted, linux, x64, ecs-qwen]
+    runs-on: [self-hosted, linux, x64, ecs-qwen]
     permissions:
       contents: 'read'
       id-token: 'write'
