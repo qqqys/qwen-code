@@ -260,7 +260,11 @@ async function readGeminiMdFiles(
                   filePath: notification.filePath,
                   memoryType: getMemoryType(notification.filePath),
                   loadReason: 'include',
-                  triggerFilePath: notification.parentFilePath,
+                  // `filePath` is the top-level discovered context file that
+                  // started this import chain; `parentFilePath` is the file that
+                  // directly `@`-imported this one. They differ for nested
+                  // imports (A -> B -> C: trigger=A, parent=B).
+                  triggerFilePath: filePath,
                   parentFilePath: notification.parentFilePath,
                 });
               },

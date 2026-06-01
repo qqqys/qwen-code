@@ -235,22 +235,23 @@ When `ok` is `false`, Qwen Code will continue working and use the `reason` as co
 
 Hooks fire at specific points during a Qwen Code session. Different events support different matchers to filter trigger conditions.
 
-| Event                | Triggered When                            | Matcher Target                                            |
-| :------------------- | :---------------------------------------- | :-------------------------------------------------------- |
-| `PreToolUse`         | Before tool execution                     | Tool name (`WriteFile`, `ReadFile`, `Bash`, etc.)         |
-| `PostToolUse`        | After successful tool execution           | Tool name                                                 |
-| `PostToolUseFailure` | After tool execution fails                | Tool name                                                 |
-| `UserPromptSubmit`   | After user submits prompt                 | None (always fires)                                       |
-| `SessionStart`       | When session starts or resumes            | Source (`startup`, `resume`, `clear`, `compact`)          |
-| `SessionEnd`         | When session ends                         | Reason (`clear`, `logout`, `prompt_input_exit`, etc.)     |
-| `Stop`               | When Claude prepares to conclude response | None (always fires)                                       |
-| `SubagentStart`      | When subagent starts                      | Agent type (`Bash`, `Explorer`, `Plan`, etc.)             |
-| `SubagentStop`       | When subagent stops                       | Agent type                                                |
-| `PreCompact`         | Before conversation compaction            | Trigger (`manual`, `auto`)                                |
-| `Notification`       | When notifications are sent               | Type (`permission_prompt`, `idle_prompt`, `auth_success`) |
-| `PermissionRequest`  | When permission dialog is shown           | Tool name                                                 |
-| `TodoCreated`        | When a new todo item is created           | None (always fires)                                       |
-| `TodoCompleted`      | When a todo item is marked as completed   | None (always fires)                                       |
+| Event                | Triggered When                             | Matcher Target                                            |
+| :------------------- | :----------------------------------------- | :-------------------------------------------------------- |
+| `PreToolUse`         | Before tool execution                      | Tool name (`WriteFile`, `ReadFile`, `Bash`, etc.)         |
+| `PostToolUse`        | After successful tool execution            | Tool name                                                 |
+| `PostToolUseFailure` | After tool execution fails                 | Tool name                                                 |
+| `UserPromptSubmit`   | After user submits prompt                  | None (always fires)                                       |
+| `SessionStart`       | When session starts or resumes             | Source (`startup`, `resume`, `clear`, `compact`)          |
+| `SessionEnd`         | When session ends                          | Reason (`clear`, `logout`, `prompt_input_exit`, etc.)     |
+| `Stop`               | When Claude prepares to conclude response  | None (always fires)                                       |
+| `SubagentStart`      | When subagent starts                       | Agent type (`Bash`, `Explorer`, `Plan`, etc.)             |
+| `SubagentStop`       | When subagent stops                        | Agent type                                                |
+| `PreCompact`         | Before conversation compaction             | Trigger (`manual`, `auto`)                                |
+| `Notification`       | When notifications are sent                | Type (`permission_prompt`, `idle_prompt`, `auth_success`) |
+| `PermissionRequest`  | When permission dialog is shown            | Tool name                                                 |
+| `TodoCreated`        | When a new todo item is created            | None (always fires)                                       |
+| `TodoCompleted`      | When a todo item is marked as completed    | None (always fires)                                       |
+| `InstructionsLoaded` | When an instruction/context file is loaded | Loaded file path (regex)                                  |
 
 ### Matcher Patterns
 
@@ -264,6 +265,7 @@ Hooks fire at specific points during a Qwen Code session. Different events suppo
 | Session Events      | `SessionEnd`                                                           | ✅ Regex        | Reason: `clear`, `logout`, `prompt_input_exit`, etc.     |
 | Notification Events | `Notification`                                                         | ✅ Exact match  | Type: `permission_prompt`, `idle_prompt`, `auth_success` |
 | Compact Events      | `PreCompact`                                                           | ✅ Exact match  | Trigger: `manual`, `auto`                                |
+| Instruction Events  | `InstructionsLoaded`                                                   | ✅ Regex        | Loaded file path: `QWEN\.md$`, `\.qwen/QWEN\.local\.md$` |
 | Todo Events         | `TodoCreated`, `TodoCompleted`                                         | ❌ No           | N/A                                                      |
 | Prompt Events       | `UserPromptSubmit`                                                     | ❌ No           | N/A                                                      |
 | Stop Events         | `Stop`                                                                 | ❌ No           | N/A                                                      |
@@ -1051,6 +1053,61 @@ exit 0
 - **Validation**: Enforce content quality standards (minimum length, required keywords)
 - **Workflow Control**: Block completion until prerequisites are met
 - **Integration**: Sync todos with external task management systems (Jira, Trello, etc.)
+
+#### InstructionsLoaded
+
+**Purpose**: Executed when an instruction/context file is loaded during memory discovery and when a file is pulled in through an `@` import. Use it to audit or react to the context sources that shape a session, without changing discovery rules. This event is observe-only: its output cannot block or alter what gets loaded.
+
+**Matcher**: a regular expression tested against the loaded file's absolute path (for example `QWEN\.md$` or `\.qwen/QWEN\.local\.md$`). An empty matcher (`""` / `"*"`) fires for every loaded file. The hook fires once per loaded file, so context trees with many `@` imports trigger it many times.
+
+**Event-specific fields**:
+
+```json
+{
+  "file_path": "absolute path of the loaded instruction/context file",
+  "memory_type": "user | project | local | extension",
+  "load_reason": "session_start | include",
+  "globs": "array of glob patterns scoping the file (optional)",
+  "trigger_file_path": "top-level discovered file that started the import chain (optional)",
+  "parent_file_path": "file that directly @-imported this one (optional)"
+}
+```
+
+- `load_reason` is `session_start` for files found by memory discovery and `include` for files brought in via `@` imports.
+- For `include` files, `trigger_file_path` is the originating top-level context file while `parent_file_path` is the immediate importer; for a single-level import the two are the same.
+
+**Output Options**:
+
+- `hookSpecificOutput.additionalContext`: additional information to include
+- Standard hook output fields (note: this event does not support blocking)
+
+**Example Configuration**:
+
+```json
+{
+  "hooks": {
+    "InstructionsLoaded": [
+      {
+        "matcher": "\\.qwen/QWEN\\.local\\.md$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.qwen/hooks/audit-instructions.sh",
+            "name": "instruction-audit",
+            "timeout": 5000
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+**Use Cases**:
+
+- **Auditing**: Record which instruction/context files (and imports) were loaded for a session
+- **Compliance**: Flag when sensitive or unexpected context sources are pulled in
+- **Integration**: Notify external systems about the context shaping a session
 
 ## Hook Configuration
 
