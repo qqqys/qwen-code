@@ -183,6 +183,52 @@ describe('memoryImportProcessor', () => {
       ]);
     });
 
+    it('notifies after importing files in flat mode', async () => {
+      const content = 'Some content @./test.md more content';
+      const basePath = testPath('test', 'path');
+      const parentFile = path.resolve(basePath, 'QWEN.md');
+      const importedFile = path.resolve(basePath, 'test.md');
+      const nestedFile = path.resolve(basePath, 'nested.md');
+      const importedFiles: Array<{
+        filePath: string;
+        parentFilePath: string;
+      }> = [];
+
+      mockedFs.access.mockResolvedValue(undefined);
+      mockedFs.readFile
+        .mockResolvedValueOnce('# Imported Content\n@./nested.md')
+        .mockResolvedValueOnce('# Nested Content');
+
+      await processImports(
+        content,
+        basePath,
+        {
+          processedFiles: new Set(),
+          maxDepth: 5,
+          currentDepth: 0,
+          currentFile: parentFile,
+        },
+        undefined,
+        'flat',
+        {
+          onFileImported: (event) => {
+            importedFiles.push(event);
+          },
+        },
+      );
+
+      expect(importedFiles).toEqual([
+        {
+          filePath: importedFile,
+          parentFilePath: parentFile,
+        },
+        {
+          filePath: nestedFile,
+          parentFilePath: importedFile,
+        },
+      ]);
+    });
+
     it('should import non-md files just like md files', async () => {
       const content = 'Some content @./instructions.txt more content';
       const basePath = testPath('test', 'path');
