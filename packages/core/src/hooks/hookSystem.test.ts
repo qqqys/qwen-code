@@ -87,6 +87,7 @@ describe('HookSystem', () => {
 
     mockHookEventHandler = {
       fireUserPromptSubmitEvent: vi.fn(),
+      fireInstructionsLoadedEvent: vi.fn(),
       fireStopEvent: vi.fn(),
       fireSessionStartEvent: vi.fn(),
       fireSessionEndEvent: vi.fn(),
@@ -430,6 +431,54 @@ describe('HookSystem', () => {
 
       expect(result).toBeDefined();
       expect(result?.getAdditionalContext()).toBe('Some additional context');
+    });
+  });
+
+  describe('fireInstructionsLoadedEvent', () => {
+    it('should fire InstructionsLoaded event and return output', async () => {
+      const mockResult = createMockAggregatedResult(true, {
+        decision: 'allow',
+        hookSpecificOutput: {
+          additionalContext: 'Loaded project instructions',
+        },
+      });
+      vi.mocked(
+        mockHookEventHandler.fireInstructionsLoadedEvent,
+      ).mockResolvedValue(mockResult);
+
+      const result = await hookSystem.fireInstructionsLoadedEvent(
+        '/repo/QWEN.md',
+        'project',
+        'session_start',
+        { triggerFilePath: '/repo/QWEN.md' },
+      );
+
+      expect(
+        mockHookEventHandler.fireInstructionsLoadedEvent,
+      ).toHaveBeenCalledWith(
+        '/repo/QWEN.md',
+        'project',
+        'session_start',
+        { triggerFilePath: '/repo/QWEN.md' },
+        undefined,
+      );
+      expect(result?.getAdditionalContext()).toBe(
+        'Loaded project instructions',
+      );
+    });
+
+    it('should return undefined when no final output', async () => {
+      vi.mocked(
+        mockHookEventHandler.fireInstructionsLoadedEvent,
+      ).mockResolvedValue(createMockAggregatedResult(true));
+
+      const result = await hookSystem.fireInstructionsLoadedEvent(
+        '/repo/QWEN.md',
+        'project',
+        'session_start',
+      );
+
+      expect(result).toBeUndefined();
     });
   });
 
