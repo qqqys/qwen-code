@@ -50,6 +50,21 @@ export interface ProcessImportsOptions {
   ) => void | Promise<void>;
 }
 
+async function notifyFileImported(
+  options: ProcessImportsOptions,
+  notification: ImportedFileNotification,
+): Promise<void> {
+  try {
+    await options.onFileImported?.(notification);
+  } catch (error) {
+    logger.warn(
+      `Import notification failed for ${notification.filePath}: ${
+        hasMessage(error) ? error.message : 'Unknown error'
+      }`,
+    );
+  }
+}
+
 // `findProjectRoot` now lives in `./projectRoot.ts` and is shared with
 // memoryDiscovery. It returns `string | null`; `processImports` below
 // preserves the previous "fall back to startDir" contract at the call
@@ -280,7 +295,7 @@ export async function processImports(
         try {
           await fs.access(fullPath);
           const importedContent = await fs.readFile(fullPath, 'utf-8');
-          await options.onFileImported?.({
+          await notifyFileImported(options, {
             filePath: normalizedFullPath,
             parentFilePath: normalizedPath,
           });
@@ -355,10 +370,6 @@ export async function processImports(
     try {
       await fs.access(fullPath);
       const fileContent = await fs.readFile(fullPath, 'utf-8');
-      await options.onFileImported?.({
-        filePath: fullPath,
-        parentFilePath: importState.currentFile ?? path.resolve(basePath),
-      });
       // Mark this file as processed for this import chain
       const newImportState: ImportState = {
         ...importState,
@@ -377,6 +388,10 @@ export async function processImports(
       );
       result += `<!-- Imported from: ${importPath} -->\n${imported.content}\n<!-- End of import from: ${importPath} -->`;
       imports.push(imported.importTree);
+      await notifyFileImported(options, {
+        filePath: fullPath,
+        parentFilePath: importState.currentFile ?? path.resolve(basePath),
+      });
     } catch (err: unknown) {
       // If file doesn't exist, preserve the original @path text (it's not a real import)
       if (isFileNotFoundError(err)) {
