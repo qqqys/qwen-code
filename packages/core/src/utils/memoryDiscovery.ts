@@ -385,6 +385,10 @@ function createMemoryTypeClassifier(
       return 'local';
     }
 
+    if (resolvedRoot && isSubpath(resolvedRoot, resolvedPath)) {
+      return 'project';
+    }
+
     if (
       resolvedPath.startsWith(`${globalQwenDir}${path.sep}`) ||
       path.dirname(resolvedPath) === resolvedHome
