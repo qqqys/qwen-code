@@ -8,7 +8,13 @@
 import * as fsSync from 'node:fs';
 import * as path from 'node:path';
 
-import { matches, nextFireTime, parseCron } from '../utils/cronParser.js';
+import { matches, parseCron } from '../utils/cronParser.js';
+import {
+  computeJitter,
+  computeNextFireMs,
+  generateId,
+  RECURRING_MAX_AGE_MS,
+} from './cron-core.js';
 import { humanReadableCron } from '../utils/cronDisplay.js';
 import { createDebugLogger } from '../utils/debugLogger.js';
 import { ToolNames } from '../tools/tool-names.js';
@@ -26,15 +32,6 @@ import { tryAcquireLock, releaseLock } from './cronTasksLock.js';
 const debugLogger = createDebugLogger('CRON_SCHEDULER');
 
 const MAX_JOBS = 50;
-// Recurring jobs auto-expire this long after creation (claw-code parity:
-// covers "check my PRs every hour this week" while bounding how long a
-// forgotten schedule keeps firing). Age is evaluated at fire time — an
-// aged job fires one final time, then is deleted.
-const RECURRING_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
-// Recurring: up to 10% of period, capped at 15 minutes.
-const MAX_RECURRING_JITTER_MS = 15 * 60 * 1000;
-// One-shot: up to 90s early for jobs landing on :00 or :30.
-const MAX_ONESHOT_JITTER_MS = 90 * 1000;
 const LOCK_PROBE_INTERVAL_MS = 5000;
 const FILE_DEBOUNCE_MS = 300;
 // Loop wakeups (self-paced /loop) align with Claude Code's ScheduleWakeup:
@@ -87,71 +84,6 @@ type PendingFire =
   | { kind: 'missed'; tasks: DurableCronTask[] }
   | { kind: 'catch-up'; ids: string[] }
   | { kind: 'final'; jobs: CronJob[] };
-
-/**
- * Deterministic hash from a string ID, returned as a positive integer.
- */
-function hashId(id: string): number {
-  let hash = 0;
-  for (let i = 0; i < id.length; i++) {
-    hash = (hash * 31 + id.charCodeAt(i)) | 0;
-  }
-  return Math.abs(hash);
-}
-
-/**
- * Derives a deterministic jitter offset from a job ID and its cron period.
- * Recurring jobs: up to 10% of period, capped at 15 minutes (added after fire time).
- * One-shot jobs landing on :00 or :30: up to 90s early (subtracted before fire time).
- * Other one-shot jobs: 0 jitter.
- */
-function computeJitter(
-  id: string,
-  cronExpr: string,
-  recurring: boolean,
-): number {
-  const hash = hashId(id);
-
-  if (recurring) {
-    // Estimate period by computing two consecutive fire times
-    const now = new Date();
-    try {
-      const first = nextFireTime(cronExpr, now);
-      const second = nextFireTime(cronExpr, first);
-      const periodMs = second.getTime() - first.getTime();
-      const tenPercent = periodMs * 0.1;
-      const maxJitter = Math.min(tenPercent, MAX_RECURRING_JITTER_MS);
-      return hash % Math.max(1, Math.floor(maxJitter));
-    } catch {
-      return 0;
-    }
-  }
-
-  // One-shot: apply up to 90s early jitter only when the fire time lands
-  // on :00 or :30 — the wall-clock marks humans round to. Checked on the
-  // computed fire time rather than the raw minute field, so lists, steps,
-  // and ranges that land on those marks are covered too (claw-code parity).
-  try {
-    const next = nextFireTime(cronExpr, new Date());
-    if (next.getMinutes() % 30 === 0) {
-      // Negative jitter = fire early
-      return -(hash % MAX_ONESHOT_JITTER_MS);
-    }
-  } catch {
-    // fall through
-  }
-
-  return 0;
-}
-
-function generateId(): string {
-  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
-  let id = '';
-  for (let i = 0; i < 8; i++) {
-    id += chars[Math.floor(Math.random() * chars.length)];
-  }
-  return id;
-}
 
 export function clampWakeupSeconds(delaySeconds: number): number {
   if (!Number.isFinite(delaySeconds)) return WAKEUP_DEFAULT_SECONDS;
@@ -1220,22 +1152,4 @@ function jobToDurableTask(job: CronJob): DurableCronTask {
     createdAt: job.createdAt,
     lastFiredAt: job.lastFiredAt ?? null,
   };
-}
-
-/**
- * Computes the next fire time for a cron expression after `afterMs`,
- * accounting for jitter. Returns null if no match in the next year.
- */
-function computeNextFireMs(
-  cronExpr: string,
-  afterMs: number,
-  jitterMs: number,
-): number | null {
-  try {
-    const afterDate = new Date(afterMs);
-    const next = nextFireTime(cronExpr, afterDate);
-    return next.getTime() + jitterMs;
-  } catch {
-    return null;
-  }
 }
