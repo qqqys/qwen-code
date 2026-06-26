@@ -185,6 +185,24 @@ export class SessionRouter {
     return sessionId;
   }
 
+  /**
+   * Drop a single session by id so the next resolve mints a fresh one — used
+   * when the daemon reports a session died (its event stream ended). Reverse
+   * lookup, since the primary index is routing-key → sessionId. Returns true if
+   * it was mapped.
+   */
+  dropSession(sessionId: string): boolean {
+    let removed = false;
+    for (const [key, id] of [...this.toSession]) {
+      if (id === sessionId) {
+        this.deleteByKey(key);
+        removed = true;
+      }
+    }
+    if (removed) this.persist();
+    return removed;
+  }
+
   /** Get all session entries for crash recovery. */
   getAll(): Array<{ key: string; sessionId: string; target: SessionTarget }> {
     const entries: Array<{

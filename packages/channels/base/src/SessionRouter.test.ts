@@ -263,4 +263,20 @@ describe('SessionRouter', () => {
       expect(bridge.newSession).not.toHaveBeenCalled();
     });
   });
+
+  describe('dropSession', () => {
+    it('unmaps a session by id so the next resolve mints a fresh one', async () => {
+      const router = new SessionRouter(bridge, '/tmp', 'thread');
+      const s1 = await router.resolve('ch', 'alice', 'chat1', 'thread1');
+      expect(router.dropSession(s1)).toBe(true);
+      const s2 = await router.resolve('ch', 'alice', 'chat1', 'thread1');
+      expect(s2).not.toBe(s1);
+      expect(bridge.newSession).toHaveBeenCalledTimes(2);
+    });
+
+    it('returns false for an unknown session id', () => {
+      const router = new SessionRouter(bridge, '/tmp');
+      expect(router.dropSession('nope')).toBe(false);
+    });
+  });
 });
