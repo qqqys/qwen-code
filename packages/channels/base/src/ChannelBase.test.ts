@@ -333,6 +333,126 @@ describe('ChannelBase', () => {
     });
   });
 
+  describe('/schedule', () => {
+    function fakeSchedule() {
+      return {
+        create: vi.fn(async (_t, cron: string, prompt: string) => ({
+          id: 'job1',
+          cron,
+          humanReadable: 'weekly',
+          prompt,
+          recurring: true,
+          nextFireMs: 1_000,
+        })),
+        list: vi.fn(() => []),
+        remove: vi.fn(async () => true),
+      };
+    }
+    // A shared group with an allowlist; sender is on it. The sender gate stays
+    // 'open' so the message reaches the handler and the /schedule owner-gate
+    // (not the sender gate) is what's under test.
+    const sharedGroup = (over: Partial<ChannelConfig> = {}) => ({
+      sessionScope: 'thread' as const,
+      groupPolicy: 'open' as const,
+      senderPolicy: 'open' as const,
+      allowedUsers: ['boss'],
+      cwd: '/work',
+      ...over,
+    });
+    const groupMsg = (text: string, senderId = 'boss') =>
+      envelope({
+        isGroup: true,
+        isMentioned: true,
+        chatId: 'g1',
+        senderId,
+        text,
+      });
+
+    it('rejects /schedule outside a shared group session', async () => {
+      const schedule = fakeSchedule();
+      const ch = createChannel({ allowedUsers: ['boss'] }, { schedule });
+      // DM (sessionScope defaults to 'user', not a shared group)
+      await ch.handleInbound(envelope({ text: '/schedule 0 9 * * 1 hi' }));
+      expect(schedule.create).not.toHaveBeenCalled();
+      expect(ch.sent[0]!.text).toContain('shared group');
+    });
+
+    it('rejects when the allowlist is empty (no unattended group broadcasts)', async () => {
+      const schedule = fakeSchedule();
+      const ch = createChannel(sharedGroup({ allowedUsers: [] }), { schedule });
+      await ch.handleInbound(groupMsg('/schedule 0 9 * * 1 hi', 'anyone'));
+      expect(schedule.create).not.toHaveBeenCalled();
+      expect(ch.sent[0]!.text).toContain('allowlist');
+    });
+
+    it('rejects a sender not on the allowlist', async () => {
+      const schedule = fakeSchedule();
+      const ch = createChannel(sharedGroup(), { schedule });
+      await ch.handleInbound(groupMsg('/schedule 0 9 * * 1 hi', 'intruder'));
+      expect(schedule.create).not.toHaveBeenCalled();
+      expect(ch.sent[0]!.text).toContain('authorized');
+    });
+
+    it('persists a standing instruction for an authorized member', async () => {
+      const schedule = fakeSchedule();
+      const ch = createChannel(sharedGroup(), { schedule });
+      await ch.handleInbound(groupMsg('/schedule 0 9 * * 1 post the digest'));
+      expect(schedule.create).toHaveBeenCalledWith(
+        {
+          channelName: 'test-chan',
+          chatId: 'g1',
+          threadId: undefined,
+          senderId: '__scheduler__',
+          cwd: '/work',
+        },
+        '0 9 * * 1',
+        'post the digest',
+        true,
+      );
+      expect(ch.sent[0]!.text).toContain('Scheduled job1');
+    });
+
+    it('lists and removes scoped to the group', async () => {
+      const schedule = fakeSchedule();
+      schedule.list.mockReturnValueOnce([
+        {
+          id: 'jobX',
+          cron: '0 9 * * 1',
+          humanReadable: 'weekly',
+          prompt: 'digest',
+          recurring: true,
+          nextFireMs: 1_000,
+        },
+      ]);
+      const ch = createChannel(sharedGroup(), { schedule });
+      await ch.handleInbound(groupMsg('/schedule list'));
+      expect(schedule.list).toHaveBeenCalled();
+      expect(ch.sent[0]!.text).toContain('jobX');
+
+      await ch.handleInbound(groupMsg('/schedule rm jobX'));
+      expect(schedule.remove).toHaveBeenCalledWith(
+        expect.objectContaining({ chatId: 'g1' }),
+        'jobX',
+      );
+    });
+
+    it('surfaces a validation error from the capability', async () => {
+      const schedule = fakeSchedule();
+      schedule.create.mockRejectedValueOnce(new Error('bad cron'));
+      const ch = createChannel(sharedGroup(), { schedule });
+      await ch.handleInbound(groupMsg('/schedule 0 0 30 2 * nope'));
+      expect(ch.sent[0]!.text).toContain('Could not schedule: bad cron');
+    });
+
+    it('shows usage when given too few cron fields', async () => {
+      const schedule = fakeSchedule();
+      const ch = createChannel(sharedGroup(), { schedule });
+      await ch.handleInbound(groupMsg('/schedule 0 9'));
+      expect(schedule.create).not.toHaveBeenCalled();
+      expect(ch.sent[0]!.text).toContain('Usage:');
+    });
+  });
+
   describe('custom commands', () => {
     it('subclass can register custom commands', async () => {
       const ch = createChannel();

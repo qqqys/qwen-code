@@ -7,7 +7,7 @@ import {
   parseCron,
   RECURRING_MAX_AGE_MS,
 } from '@qwen-code/qwen-code-core';
-import type { SessionRouter } from '@qwen-code/channel-base';
+import type { SessionRouter, ScheduleTarget } from '@qwen-code/channel-base';
 import type { ChannelCronJob, ChannelCronStore } from './channel-cron-store.js';
 
 /** Reconciler cadence; also the cap on any single armed timer (no multi-day setTimeout). */
@@ -18,6 +18,8 @@ const SKEW_THRESHOLD_MS = 90_000;
 const MAX_CONSECUTIVE_FAILURES = 3;
 /** Hard cap on stored jobs (mirrors core's MAX_JOBS). */
 const MAX_JOBS = 50;
+/** Per-group cap so one group can't monopolize the global budget. */
+const MAX_JOBS_PER_TARGET = 10;
 /** A hung fire is force-failed after this long so it can't pin its inFlight slot. */
 const DISPATCH_TIMEOUT_MS = 5 * 60_000;
 /** A one-shot missed during downtime fires only if it's no later than this. */
@@ -139,10 +141,23 @@ export class ChannelCronScheduler {
   }
 
   /**
-   * Create a job for a routed session. Rejects user-scoped channels: a proactive
-   * fire there would mint a per-user phantom session instead of reaching the
-   * shared group. Validates the cron parses AND has a future match (rejecting
-   * never-match exprs like `0 0 30 2 *`).
+   * Create a job for an explicit routing target (the `/schedule` command path —
+   * the target is built from the Envelope, not a resolved sessionId, so it
+   * survives `/clear`). The caller (channel) has already gated scope/auth.
+   */
+  createForTarget(
+    target: ScheduleTarget,
+    cron: string,
+    prompt: string,
+    recurring: boolean,
+  ): Promise<ChannelCronJob> {
+    return this.addJob(target, cron, prompt, recurring);
+  }
+
+  /**
+   * Create a job for a routed session (the in-session cron-tool path). Rejects
+   * user-scoped channels: a proactive fire there would mint a per-user phantom
+   * session instead of reaching the shared group.
    */
   async createForSession(
     sessionId: string,
@@ -150,9 +165,6 @@ export class ChannelCronScheduler {
     prompt: string,
     recurring: boolean,
   ): Promise<ChannelCronJob> {
-    parseCron(cron);
-    nextFireTime(cron, new Date());
-
     const target = this.router.getTarget(sessionId);
     if (!target) {
       throw new Error(`cannot schedule: unknown session ${sessionId}`);
@@ -167,8 +179,48 @@ export class ChannelCronScheduler {
     if (!cwd) {
       throw new Error(`cannot schedule: no workspace for session ${sessionId}`);
     }
+    return this.addJob(
+      {
+        channelName: target.channelName,
+        chatId: target.chatId,
+        threadId: target.threadId,
+        senderId: target.senderId,
+        cwd,
+      },
+      cron,
+      prompt,
+      recurring,
+    );
+  }
+
+  /**
+   * Validate, build, and persist a job. Cron must parse AND have a future match
+   * (rejecting never-match exprs like `0 0 30 2 *`). senderId is forced to the
+   * scheduler sentinel — these targets are thread/single-scoped, where routing
+   * ignores it. Enforces a global and a per-group cap.
+   */
+  private async addJob(
+    target: ScheduleTarget,
+    cron: string,
+    prompt: string,
+    recurring: boolean,
+  ): Promise<ChannelCronJob> {
+    parseCron(cron);
+    nextFireTime(cron, new Date());
+
     if (this.jobs.size >= MAX_JOBS) {
-      throw new Error(`cannot schedule: job limit (${MAX_JOBS}) reached`);
+      throw new Error(
+        `cannot schedule: global job limit (${MAX_JOBS}) reached`,
+      );
+    }
+    const key = this.router.keyForTarget(target);
+    const perTarget = [...this.jobs.values()].filter(
+      (j) => this.router.keyForTarget(j.target) === key,
+    ).length;
+    if (perTarget >= MAX_JOBS_PER_TARGET) {
+      throw new Error(
+        `cannot schedule: this group's limit (${MAX_JOBS_PER_TARGET}) reached`,
+      );
     }
 
     let id = generateId();
@@ -186,7 +238,7 @@ export class ChannelCronScheduler {
         chatId: target.chatId,
         threadId: target.threadId,
         senderId: '__scheduler__',
-        cwd,
+        cwd: target.cwd,
       },
     };
     this.jobs.set(id, job);
@@ -195,14 +247,21 @@ export class ChannelCronScheduler {
     return job;
   }
 
+  /** Delete a job iff it belongs to the given target's routing scope. */
+  removeForTarget(target: ScheduleTarget, id: string): Promise<boolean> {
+    return this.removeScoped(this.router.keyForTarget(target), id);
+  }
+
   /** Delete a job iff it belongs to the calling session's routing scope. */
   async deleteForSession(sessionId: string, id: string): Promise<boolean> {
-    const job = this.jobs.get(id);
     const target = this.router.getTarget(sessionId);
-    if (!job || !target) return false;
-    if (
-      this.router.keyForTarget(job.target) !== this.router.keyForTarget(target)
-    ) {
+    if (!target) return false;
+    return this.removeScoped(this.router.keyForTarget(target), id);
+  }
+
+  private async removeScoped(routingKey: string, id: string): Promise<boolean> {
+    const job = this.jobs.get(id);
+    if (!job || this.router.keyForTarget(job.target) !== routingKey) {
       return false;
     }
     this.jobs.delete(id);
@@ -212,13 +271,21 @@ export class ChannelCronScheduler {
     return true;
   }
 
+  /** Jobs scoped to a target's routing key (thread/single = the group). */
+  listForTarget(target: ScheduleTarget): ChannelCronJob[] {
+    return this.listScoped(this.router.keyForTarget(target));
+  }
+
   /** Jobs visible to a session — scoped by routing key (thread/single = the group). */
   listForSession(sessionId: string): ChannelCronJob[] {
     const target = this.router.getTarget(sessionId);
     if (!target) return [];
-    const key = this.router.keyForTarget(target);
+    return this.listScoped(this.router.keyForTarget(target));
+  }
+
+  private listScoped(routingKey: string): ChannelCronJob[] {
     return [...this.jobs.values()].filter(
-      (j) => this.router.keyForTarget(j.target) === key,
+      (j) => this.router.keyForTarget(j.target) === routingKey,
     );
   }
 

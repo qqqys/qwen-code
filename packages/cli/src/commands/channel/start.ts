@@ -8,6 +8,7 @@ import { writeStderrLine, writeStdoutLine } from '../../utils/stdioHelpers.js';
 import { AcpBridge, SessionRouter } from '@qwen-code/channel-base';
 import type {
   ChannelBase,
+  ChannelBaseOptions,
   ChannelPlugin,
   ToolCallEvent,
 } from '@qwen-code/channel-base';
@@ -18,6 +19,7 @@ import {
   createProactiveFire,
 } from './channel-cron-scheduler.js';
 import { ChannelCronStore, scheduledJobsPath } from './channel-cron-store.js';
+import { createScheduleCapability } from './schedule-capability.js';
 import {
   readServiceInfo,
   writeServiceInfo,
@@ -146,7 +148,7 @@ async function createChannel(
   name: string,
   config: Awaited<ReturnType<typeof parseChannelConfig>>,
   bridge: AcpBridge,
-  options?: { router?: SessionRouter; proxy?: string },
+  options?: ChannelBaseOptions,
 ): Promise<ChannelBase> {
   const channelPlugin = await getPlugin(config.type);
   if (!channelPlugin) {
@@ -225,8 +227,20 @@ async function startSingle(name: string, proxy?: string): Promise<void> {
     sessionsPath(),
   );
   const channels: Map<string, ChannelBase> = new Map();
+  // Construct now — onFire reads the channels map lazily at fire time, so the
+  // map being empty here is fine. start() is deferred until channels connect.
+  const scheduler = new ChannelCronScheduler(
+    new ChannelCronStore(scheduledJobsPath()),
+    router,
+    createProactiveFire(router, channels),
+  );
+  const schedule = createScheduleCapability(() => scheduler);
 
-  const channel = await createChannel(name, config, bridge, { router, proxy });
+  const channel = await createChannel(name, config, bridge, {
+    router,
+    proxy,
+    schedule,
+  });
   channels.set(name, channel);
   registerToolCallDispatch(bridge, router, channels);
 
@@ -290,13 +304,9 @@ async function startSingle(name: string, proxy?: string): Promise<void> {
   };
   attachDisconnectHandler(bridge);
 
-  // Gateway-owned durable scheduler. onFire closes over router + channels (both
-  // stable across bridge restart — setBridge re-points them), never the bridge.
-  const scheduler = new ChannelCronScheduler(
-    new ChannelCronStore(scheduledJobsPath()),
-    router,
-    createProactiveFire(router, channels),
-  );
+  // Start now that the channel is connected (onFire dispatches through it, and
+  // catch-up fires need a live channel). The bridge may later be swapped on
+  // crash recovery — onFire goes through router + channels, never the bridge.
   await scheduler.start();
 
   const shutdown = () => {
@@ -377,6 +387,14 @@ async function startAll(proxy?: string): Promise<void> {
     router.setChannelScope(name, config.sessionScope);
   }
   const channels: Map<string, ChannelBase> = new Map();
+  // Construct now — onFire reads the channels map lazily at fire time, so the
+  // map being empty here is fine. start() is deferred until channels connect.
+  const scheduler = new ChannelCronScheduler(
+    new ChannelCronStore(scheduledJobsPath()),
+    router,
+    createProactiveFire(router, channels),
+  );
+  const schedule = createScheduleCapability(() => scheduler);
 
   writeStdoutLine(
     `[Channel] Starting ${parsed.length} channel(s): ${parsed.map((p) => p.name).join(', ')}`,
@@ -385,7 +403,7 @@ async function startAll(proxy?: string): Promise<void> {
   for (const { name, config } of parsed) {
     channels.set(
       name,
-      await createChannel(name, config, bridge, { router, proxy }),
+      await createChannel(name, config, bridge, { router, proxy, schedule }),
     );
   }
   registerToolCallDispatch(bridge, router, channels);
@@ -469,14 +487,9 @@ async function startAll(proxy?: string): Promise<void> {
   };
   attachDisconnectHandler(bridge);
 
-  // Gateway-owned durable scheduler, shared across all channels. onFire resolves
-  // per-job target.cwd so a cold-group fire lands in the channel's workspace,
-  // not the shared defaultCwd (process.cwd()).
-  const scheduler = new ChannelCronScheduler(
-    new ChannelCronStore(scheduledJobsPath()),
-    router,
-    createProactiveFire(router, channels),
-  );
+  // Start now that channels are connected. onFire resolves per-job target.cwd so
+  // a cold-group fire lands in the channel's workspace, not defaultCwd
+  // (process.cwd()); it goes through router + channels, never the bridge.
   await scheduler.start();
 
   const shutdown = () => {

@@ -6,10 +6,19 @@ import { PairingStore } from './PairingStore.js';
 import { SessionRouter } from './SessionRouter.js';
 import type { ToolCallEvent } from './AcpBridge.js';
 import type { SessionBridge } from './SessionBridge.js';
+import type {
+  ScheduleCapability,
+  ScheduleTarget,
+} from './ScheduleCapability.js';
+
+/** Cap on a standing-instruction prompt (owner-authored, but bound regardless). */
+const MAX_SCHEDULE_PROMPT_LEN = 2000;
 
 export interface ChannelBaseOptions {
   router?: SessionRouter;
   proxy?: string;
+  /** In-channel scheduling surface; absent when no gateway scheduler hosts the channel. */
+  schedule?: ScheduleCapability;
 }
 
 /** Handler for a slash command. Return true if handled, false to forward to agent. */
@@ -24,6 +33,8 @@ export abstract class ChannelBase {
   protected name: string;
   /** Resolved proxy URL, available to subclasses for adapter-specific clients. */
   protected proxy?: string;
+  /** Gateway scheduling surface for /schedule; absent off the gateway. */
+  protected schedule?: ScheduleCapability;
   private instructedSessions: Set<string> = new Set();
   private commands: Map<string, CommandHandler> = new Map();
   /** Per-session promise chain to serialize prompt + send (followup mode). */
@@ -56,6 +67,7 @@ export abstract class ChannelBase {
     this.config = config;
     this.bridge = bridge;
     this.proxy = options?.proxy;
+    this.schedule = options?.schedule;
 
     this.groupGate = new GroupGate(config.groupPolicy, config.groups);
 
@@ -149,6 +161,15 @@ export abstract class ChannelBase {
     this.commands.set(name.toLowerCase(), handler);
   }
 
+  /**
+   * A thread-scoped group session is shared across all members, so mutations
+   * (clear, schedule) must be gated on the allowlist. DMs and per-user groups
+   * touch only the caller's own session.
+   */
+  protected isSharedGroupSession(envelope: Envelope): boolean {
+    return envelope.isGroup && this.config.sessionScope === 'thread';
+  }
+
   /** Register shared slash commands. Called from constructor. */
   private registerSharedCommands(): void {
     const doClear = async (envelope: Envelope): Promise<void> => {
@@ -171,15 +192,12 @@ export abstract class ChannelBase {
       }
     };
 
-    const isSharedGroupSession = (envelope: Envelope): boolean =>
-      envelope.isGroup && this.config.sessionScope === 'thread';
-
     // In a thread-scoped group the session is shared, so clearing it affects
     // everyone: restrict it to authorized senders (config.allowedUsers, when
     // set) and require an explicit "confirm". DMs and per-user groups clear
     // directly — there /clear only touches the caller's own session.
     const clearHandler: CommandHandler = async (envelope, args) => {
-      if (isSharedGroupSession(envelope)) {
+      if (this.isSharedGroupSession(envelope)) {
         const authorized = this.config.allowedUsers;
         if (authorized.length > 0 && !authorized.includes(envelope.senderId)) {
           await this.sendMessage(
@@ -232,7 +250,7 @@ export abstract class ChannelBase {
       const lines = [
         'Commands:',
         '/help — Show this help',
-        isSharedGroupSession(envelope)
+        this.isSharedGroupSession(envelope)
           ? '/clear confirm — Clear the shared group session (aliases: /reset, /new)'
           : '/clear — Clear your session (aliases: /reset, /new)',
         '/who — Show current session & workspace',
@@ -286,6 +304,137 @@ export abstract class ChannelBase {
       await this.sendMessage(envelope.chatId, lines.join('\n'));
       return true;
     });
+
+    this.registerCommand('schedule', (envelope, args) =>
+      this.handleScheduleCommand(envelope, args),
+    );
+  }
+
+  /**
+   * `/schedule <m> <h> <dom> <mon> <dow> <prompt…>` | `list` | `rm <id>`.
+   * Capture only — persists a standing instruction the gateway fires later. The
+   * target is bound to the chat/thread (not a resolved sessionId) so it survives
+   * `/clear`. Restricted to shared thread-scoped groups and gated on a non-empty
+   * allowlist: standing instructions fire unattended and cold-push the whole
+   * group, so an empty allowlist would let any member arm group-wide broadcasts.
+   */
+  private async handleScheduleCommand(
+    envelope: Envelope,
+    args: string,
+  ): Promise<boolean> {
+    if (!this.isSharedGroupSession(envelope)) {
+      await this.sendMessage(
+        envelope.chatId,
+        '/schedule is only available in a shared group session.',
+      );
+      return true;
+    }
+    const authorized = this.config.allowedUsers;
+    if (authorized.length === 0 || !authorized.includes(envelope.senderId)) {
+      await this.sendMessage(
+        envelope.chatId,
+        'Scheduling requires a configured allowlist; only authorized members can set standing instructions.',
+      );
+      return true;
+    }
+    if (!this.schedule) {
+      await this.sendMessage(
+        envelope.chatId,
+        'Scheduling is not available on this channel.',
+      );
+      return true;
+    }
+
+    const target: ScheduleTarget = {
+      channelName: this.name,
+      chatId: envelope.chatId,
+      threadId: envelope.threadId,
+      // thread/single routing ignores senderId; the scheduler is the "speaker".
+      senderId: '__scheduler__',
+      cwd: this.config.cwd,
+    };
+    const tokens = args.trim().length ? args.trim().split(/\s+/) : [];
+    const sub = (tokens[0] ?? '').toLowerCase();
+
+    if (sub === 'list') {
+      const jobs = this.schedule.list(target);
+      if (jobs.length === 0) {
+        await this.sendMessage(
+          envelope.chatId,
+          'No standing instructions for this group.',
+        );
+        return true;
+      }
+      const lines = ['Standing instructions:'];
+      for (const j of jobs) {
+        const next = j.nextFireMs
+          ? new Date(j.nextFireMs).toLocaleString()
+          : 'never';
+        lines.push(
+          `• ${j.id} — ${j.humanReadable} (next ${next}): ${j.prompt}`,
+        );
+      }
+      await this.sendMessage(envelope.chatId, lines.join('\n'));
+      return true;
+    }
+
+    if (sub === 'rm' || sub === 'delete' || sub === 'cancel') {
+      const id = tokens[1];
+      if (!id) {
+        await this.sendMessage(envelope.chatId, 'Usage: /schedule rm <id>');
+        return true;
+      }
+      const removed = await this.schedule.remove(target, id);
+      await this.sendMessage(
+        envelope.chatId,
+        removed
+          ? `Removed standing instruction ${id}.`
+          : `No standing instruction ${id} in this group.`,
+      );
+      return true;
+    }
+
+    // Set: 5 cron fields + prompt.
+    if (tokens.length < 6) {
+      await this.sendMessage(
+        envelope.chatId,
+        [
+          'Usage: /schedule <min> <hour> <dom> <mon> <dow> <prompt>',
+          '  e.g. /schedule 0 9 * * 1 post the weekly digest',
+          '  also: /schedule list · /schedule rm <id>',
+        ].join('\n'),
+      );
+      return true;
+    }
+    const cron = tokens.slice(0, 5).join(' ');
+    const prompt = tokens.slice(5).join(' ');
+    if (prompt.length > MAX_SCHEDULE_PROMPT_LEN) {
+      await this.sendMessage(
+        envelope.chatId,
+        `Prompt too long (max ${MAX_SCHEDULE_PROMPT_LEN} characters).`,
+      );
+      return true;
+    }
+    try {
+      const job = await this.schedule.create(target, cron, prompt, true);
+      const next = job.nextFireMs
+        ? new Date(job.nextFireMs).toLocaleString()
+        : 'unknown';
+      await this.sendMessage(
+        envelope.chatId,
+        [
+          `Scheduled ${job.id}: ${job.humanReadable}.`,
+          `Next fire: ${next} (daemon host timezone).`,
+          `Prompt: ${job.prompt}`,
+        ].join('\n'),
+      );
+    } catch (err) {
+      await this.sendMessage(
+        envelope.chatId,
+        `Could not schedule: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    return true;
   }
 
   /** Check if a message text matches a registered local command. */

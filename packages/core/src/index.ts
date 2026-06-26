@@ -202,6 +202,7 @@ export {
   MAX_ONESHOT_JITTER_MS,
 } from './services/cron-core.js';
 export { parseCron, nextFireTime } from './utils/cronParser.js';
+export { humanReadableCron } from './utils/cronDisplay.js';
 export type { DurableCronTask } from './services/cronTasksFile.js';
 export * from './services/fileDiscoveryService.js';
 export * from './services/fileHistoryService.js';

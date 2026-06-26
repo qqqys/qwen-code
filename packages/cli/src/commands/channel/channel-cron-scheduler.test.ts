@@ -227,6 +227,84 @@ describe('ChannelCronScheduler', () => {
     });
   });
 
+  describe('target-based mutation (/schedule path)', () => {
+    // Routing key like the real router under 'thread' scope: ignores senderId.
+    const router = {
+      keyForTarget: (t: {
+        channelName: string;
+        chatId: string;
+        threadId?: string;
+      }) => `${t.channelName}:${t.threadId ?? t.chatId}`,
+    } as unknown as SessionRouter;
+    const target = {
+      channelName: 'dingtalk',
+      chatId: 'g1',
+      cwd: '/work/dingtalk',
+      senderId: '__scheduler__',
+    };
+
+    it('creates, lists, and persists a job from a target (no sessionId)', async () => {
+      const store = new FakeStore();
+      const s = new ChannelCronScheduler(
+        asStore(store),
+        router,
+        vi.fn<ProactiveFire>(),
+      );
+      await s.start();
+      const job = await s.createForTarget(target, '0 9 * * 1', 'digest', true);
+      expect(job.target.cwd).toBe('/work/dingtalk');
+      expect(job.target.senderId).toBe('__scheduler__');
+      expect(s.listForTarget(target).map((j) => j.id)).toEqual([job.id]);
+      expect(store.last()).toHaveLength(1);
+      s.stop();
+    });
+
+    it('enforces the per-group cap', async () => {
+      const s = new ChannelCronScheduler(
+        asStore(new FakeStore()),
+        router,
+        vi.fn<ProactiveFire>(),
+      );
+      await s.start();
+      for (let i = 0; i < 10; i++) {
+        await s.createForTarget(target, '0 9 * * 1', `j${i}`, true);
+      }
+      await expect(
+        s.createForTarget(target, '0 9 * * 1', 'overflow', true),
+      ).rejects.toThrow(/limit/);
+      s.stop();
+    });
+
+    it('removes only within the target routing scope', async () => {
+      const s = new ChannelCronScheduler(
+        asStore(new FakeStore()),
+        router,
+        vi.fn<ProactiveFire>(),
+      );
+      await s.start();
+      const job = await s.createForTarget(target, '0 9 * * 1', 'digest', true);
+      const otherGroup = { ...target, chatId: 'g2' };
+      expect(await s.removeForTarget(otherGroup, job.id)).toBe(false); // wrong group
+      expect(s.listForTarget(target)).toHaveLength(1);
+      expect(await s.removeForTarget(target, job.id)).toBe(true);
+      expect(s.listForTarget(target)).toHaveLength(0);
+      s.stop();
+    });
+
+    it('rejects a never-match cron', async () => {
+      const s = new ChannelCronScheduler(
+        asStore(new FakeStore()),
+        router,
+        vi.fn<ProactiveFire>(),
+      );
+      await s.start();
+      await expect(
+        s.createForTarget(target, '0 0 30 2 *', 'never', true),
+      ).rejects.toThrow();
+      s.stop();
+    });
+  });
+
   describe('createProactiveFire', () => {
     it('pins target.cwd so a cold-group fire lands in the channel workspace', async () => {
       const resolve = vi.fn().mockResolvedValue('sess-cold');

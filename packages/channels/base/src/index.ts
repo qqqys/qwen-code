@@ -21,6 +21,11 @@ export { BlockStreamer } from './BlockStreamer.js';
 export type { BlockStreamerOptions } from './BlockStreamer.js';
 export { ChannelBase } from './ChannelBase.js';
 export type { ChannelBaseOptions } from './ChannelBase.js';
+export type {
+  ScheduleCapability,
+  ScheduleTarget,
+  ScheduledJobView,
+} from './ScheduleCapability.js';
 export { PairingStore } from './PairingStore.js';
 export type { PairingRequest } from './PairingStore.js';
 export { GroupGate } from './GroupGate.js';
