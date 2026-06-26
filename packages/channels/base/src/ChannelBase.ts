@@ -32,7 +32,13 @@ export abstract class ChannelBase {
   /** Per-session active prompt tracking for dispatch modes. */
   private activePrompts: Map<
     string,
-    { cancelled: boolean; done: Promise<void>; resolve: () => void }
+    {
+      cancelled: boolean;
+      done: Promise<void>;
+      resolve: () => void;
+      // Proactive (scheduled) turns are never cancelled by a concurrent human turn.
+      isProactive?: boolean;
+    }
   > = new Map();
   /** Per-session message buffer for collect mode. */
   private collectBuffers: Map<
@@ -446,6 +452,9 @@ export abstract class ChannelBase {
           return;
         }
         case 'steer': {
+          // Never cancel an in-flight proactive (scheduled) turn — treat as
+          // followup so the scheduled push always completes.
+          if (active.isProactive) break;
           // Cancel the running prompt, then fall through to send a new one
           active.cancelled = true;
           await this.bridge.cancelSession(sessionId).catch(() => {});
@@ -476,7 +485,12 @@ export abstract class ChannelBase {
       const done = new Promise<void>((r) => {
         doneResolve = r;
       });
-      const promptState = { cancelled: false, done, resolve: doneResolve };
+      const promptState = {
+        cancelled: false,
+        done,
+        resolve: doneResolve,
+        isProactive: false,
+      };
       this.activePrompts.set(sessionId, promptState);
 
       this.onPromptStart(envelope.chatId, sessionId, envelope.messageId);
@@ -519,35 +533,8 @@ export abstract class ChannelBase {
         // Signal any steer waiter that we're done
         promptState.resolve();
 
-        // Drain collect buffer if any messages accumulated
-        const buffer = this.collectBuffers.get(sessionId);
-        if (buffer && buffer.length > 0) {
-          this.collectBuffers.delete(sessionId);
-          const lost = buffer.length;
-          const coalesced = buffer.map((b) => b.text).join('\n\n');
-          const lastEnvelope = buffer[buffer.length - 1]!.envelope;
-          // Re-enter handleInbound with the coalesced message
-          const syntheticEnvelope: Envelope = {
-            ...lastEnvelope,
-            text: coalesced,
-            // Coalesced text already carries each message's [sender] prefix.
-            alreadyPrefixed: true,
-            // Clear attachments/references — already resolved in original text
-            referencedText: undefined,
-            attachments: undefined,
-            imageBase64: undefined,
-            imageMimeType: undefined,
-          };
-          // Queue the coalesced prompt (don't await to avoid deadlock on the queue).
-          // Surface a drain failure instead of silently losing buffered turns.
-          this.handleInbound(syntheticEnvelope).catch((err) => {
-            process.stderr.write(
-              `[${this.name}] dropped ${lost} buffered message(s) on collect re-entry: ${
-                err instanceof Error ? err.message : String(err)
-              }\n`,
-            );
-          });
-        }
+        // Drain any messages buffered while this prompt ran (collect mode).
+        this.drainCollectBuffer(sessionId);
       }
     });
     this.sessionQueues.set(
@@ -555,6 +542,105 @@ export abstract class ChannelBase {
       current.catch(() => {}),
     );
     await current;
+  }
+
+  /**
+   * Fire a scheduled/proactive prompt into an existing (possibly group-shared)
+   * session with no triggering message. Serializes through the same
+   * `sessionQueues` chain as human turns, so at `bridge.prompt()` time no other
+   * turn is active (a DaemonChannelBridge would otherwise throw on overlap) and
+   * the turn is never cancelled by a concurrent human steer. Returns the agent
+   * text for the caller (the gateway scheduler) to deliver. Public because the
+   * scheduler is not a subclass.
+   */
+  async dispatchProactive(
+    sessionId: string,
+    chatId: string,
+    promptText: string,
+  ): Promise<string> {
+    const prev = this.sessionQueues.get(sessionId) ?? Promise.resolve();
+    const current = prev.then(async () => {
+      let doneResolve: () => void = () => {};
+      const done = new Promise<void>((r) => {
+        doneResolve = r;
+      });
+      const promptState = {
+        cancelled: false,
+        done,
+        resolve: doneResolve,
+        isProactive: true,
+      };
+      this.activePrompts.set(sessionId, promptState);
+      this.onPromptStart(chatId, sessionId);
+
+      const onChunk = (sid: string, chunk: string) => {
+        if (sid === sessionId) this.onResponseChunk(chatId, chunk, sessionId);
+      };
+      this.bridge.on('textChunk', onChunk);
+      try {
+        const response = await this.bridge.prompt(sessionId, promptText);
+        if (response) {
+          await this.onProactiveComplete(chatId, response, sessionId);
+        }
+        return response;
+      } finally {
+        this.bridge.off('textChunk', onChunk);
+        this.onPromptEnd(chatId, sessionId);
+        this.activePrompts.delete(sessionId);
+        promptState.resolve();
+        this.drainCollectBuffer(sessionId);
+      }
+    });
+    this.sessionQueues.set(
+      sessionId,
+      current.then(
+        () => {},
+        () => {},
+      ),
+    );
+    return current;
+  }
+
+  /**
+   * Delivery hook for proactive output. Defaults to onResponseComplete;
+   * adapters (e.g. DingtalkChannel) override to use a cold-group send path.
+   */
+  protected async onProactiveComplete(
+    chatId: string,
+    fullText: string,
+    sessionId: string,
+  ): Promise<void> {
+    await this.onResponseComplete(chatId, fullText, sessionId);
+  }
+
+  /** Drain messages buffered while a prompt ran (collect mode); re-enter coalesced. */
+  private drainCollectBuffer(sessionId: string): void {
+    const buffer = this.collectBuffers.get(sessionId);
+    if (!buffer || buffer.length === 0) return;
+    this.collectBuffers.delete(sessionId);
+    const lost = buffer.length;
+    const coalesced = buffer.map((b) => b.text).join('\n\n');
+    const lastEnvelope = buffer[buffer.length - 1]!.envelope;
+    const syntheticEnvelope: Envelope = {
+      ...lastEnvelope,
+      text: coalesced,
+      // Coalesced text already carries each message's [sender] prefix.
+      alreadyPrefixed: true,
+      // Clear attachments/references — already resolved in original text
+      referencedText: undefined,
+      attachments: undefined,
+      imageBase64: undefined,
+      imageMimeType: undefined,
+    };
+    // Queue the coalesced prompt (don't await to avoid deadlock on the queue).
+    // Surface a drain failure instead of silently losing buffered turns.
+    this.handleInbound(syntheticEnvelope).catch((err) => {
+      process.stderr.write(
+        `[${this.name}] dropped ${lost} buffered message(s) on collect re-entry: ${
+          err instanceof Error ? err.message : String(err)
+        }\n`,
+      );
+    });
   }
 
   protected async onPairingRequired(

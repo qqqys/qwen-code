@@ -1013,4 +1013,64 @@ describe('ChannelBase', () => {
       expect((ch as any).isLocalCommand('/unknown')).toBe(false);
     });
   });
+
+  describe('proactive fire (dispatchProactive)', () => {
+    it('runs a turn, returns the agent text, and delivers it once', async () => {
+      const ch = createChannel({ sessionScope: 'thread', groupPolicy: 'open' });
+      const text = await ch.dispatchProactive(
+        's-proactive',
+        'g1',
+        'daily digest',
+      );
+      expect(text).toBe('agent response');
+      expect(bridge.prompt).toHaveBeenCalledWith('s-proactive', 'daily digest');
+      expect(ch.sent).toEqual([{ chatId: 'g1', text: 'agent response' }]);
+      expect(ch.promptStarts).toHaveLength(1);
+      expect(ch.promptEnds).toHaveLength(1);
+    });
+
+    it('does not deliver an empty response', async () => {
+      (bridge.prompt as ReturnType<typeof vi.fn>).mockResolvedValue('');
+      const ch = createChannel({ sessionScope: 'thread', groupPolicy: 'open' });
+      const text = await ch.dispatchProactive('s-x', 'g1', 'x');
+      expect(text).toBe('');
+      expect(ch.sent).toEqual([]);
+    });
+
+    it('a human steer turn does not cancel an in-flight proactive turn', async () => {
+      const cancelSession = vi.fn().mockResolvedValue(undefined);
+      (bridge as unknown as Record<string, unknown>).cancelSession =
+        cancelSession;
+
+      let resolveProactive!: (v: string) => void;
+      const proactive = new Promise<string>((r) => {
+        resolveProactive = r;
+      });
+      let call = 0;
+      (bridge.prompt as ReturnType<typeof vi.fn>).mockImplementation(() => {
+        call++;
+        if (call === 1) return Promise.resolve('hi'); // human turn that creates the session
+        if (call === 2) return proactive; // proactive turn (slow)
+        return Promise.resolve('after');
+      });
+
+      const ch = createChannel({ sessionScope: 'thread', groupPolicy: 'open' }); // steer default
+      const g = envelope({ isGroup: true, isMentioned: true, chatId: 'g1' });
+
+      await ch.handleInbound({ ...g, text: 'hello' }); // creates s-1
+      ch.sent = [];
+
+      const pFire = ch.dispatchProactive('s-1', 'g1', 'scheduled');
+      await vi.waitFor(() => expect(call).toBe(2)); // proactive prompt in flight
+
+      const pHuman = ch.handleInbound({ ...g, text: 'interrupt' });
+      resolveProactive('scheduled done');
+      await pFire;
+      await pHuman;
+
+      // steer must not have cancelled the proactive turn; the human turn ran after it
+      expect(cancelSession).not.toHaveBeenCalled();
+      expect(call).toBe(3);
+    });
+  });
 });
