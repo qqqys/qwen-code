@@ -95,6 +95,39 @@ export class SessionRouter {
     return this.toTarget.get(sessionId);
   }
 
+  /** Resolved scope for a channel — its override, else the router default. */
+  getScope(channelName: string): SessionScope {
+    return this.channelScopes.get(channelName) || this.defaultScope;
+  }
+
+  /**
+   * Workspace cwd a session was minted in. The gateway scheduler pins this on a
+   * proactive fire so a cold-group re-resolve lands in the channel's workspace,
+   * not the gateway's process.cwd().
+   */
+  getCwd(sessionId: string): string | undefined {
+    return this.toCwd.get(sessionId);
+  }
+
+  /**
+   * Routing key for an arbitrary target under its channel's scope. Lets the
+   * gateway scheduler scope list/delete to the session's group (thread/single
+   * ignore senderId; a missing senderId falls back to the scheduler sentinel).
+   */
+  keyForTarget(target: {
+    channelName: string;
+    senderId?: string;
+    chatId: string;
+    threadId?: string;
+  }): string {
+    return this.routingKey(
+      target.channelName,
+      target.senderId ?? '__scheduler__',
+      target.chatId,
+      target.threadId,
+    );
+  }
+
   hasSession(
     channelName: string,
     senderId: string,

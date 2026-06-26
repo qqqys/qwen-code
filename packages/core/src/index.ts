@@ -192,6 +192,16 @@ export {
 } from './services/chatCompressionService.js';
 export * from './services/chatRecordingService.js';
 export * from './services/cronScheduler.js';
+export {
+  computeJitter,
+  generateId,
+  computeNextFireMs,
+  dueMatchedMinute,
+  RECURRING_MAX_AGE_MS,
+  MAX_RECURRING_JITTER_MS,
+  MAX_ONESHOT_JITTER_MS,
+} from './services/cron-core.js';
+export { parseCron, nextFireTime } from './utils/cronParser.js';
 export type { DurableCronTask } from './services/cronTasksFile.js';
 export * from './services/fileDiscoveryService.js';
 export * from './services/fileHistoryService.js';

@@ -14,6 +14,11 @@ import type {
 import { getPlugin, registerPlugin } from './channel-registry.js';
 import { findCliEntryPath, parseChannelConfig } from './config-utils.js';
 import {
+  ChannelCronScheduler,
+  createProactiveFire,
+} from './channel-cron-scheduler.js';
+import { ChannelCronStore, scheduledJobsPath } from './channel-cron-store.js';
+import {
   readServiceInfo,
   writeServiceInfo,
   removeServiceInfo,
@@ -285,9 +290,19 @@ async function startSingle(name: string, proxy?: string): Promise<void> {
   };
   attachDisconnectHandler(bridge);
 
+  // Gateway-owned durable scheduler. onFire closes over router + channels (both
+  // stable across bridge restart — setBridge re-points them), never the bridge.
+  const scheduler = new ChannelCronScheduler(
+    new ChannelCronStore(scheduledJobsPath()),
+    router,
+    createProactiveFire(router, channels),
+  );
+  await scheduler.start();
+
   const shutdown = () => {
     shuttingDown = true;
     writeStdoutLine('\n[Channel] Shutting down...');
+    scheduler.stop();
     channel.disconnect();
     bridge.stop();
     router.clearAll();
@@ -454,9 +469,20 @@ async function startAll(proxy?: string): Promise<void> {
   };
   attachDisconnectHandler(bridge);
 
+  // Gateway-owned durable scheduler, shared across all channels. onFire resolves
+  // per-job target.cwd so a cold-group fire lands in the channel's workspace,
+  // not the shared defaultCwd (process.cwd()).
+  const scheduler = new ChannelCronScheduler(
+    new ChannelCronStore(scheduledJobsPath()),
+    router,
+    createProactiveFire(router, channels),
+  );
+  await scheduler.start();
+
   const shutdown = () => {
     shuttingDown = true;
     writeStdoutLine('\n[Channel] Shutting down...');
+    scheduler.stop();
     for (const [name, channel] of channels) {
       try {
         channel.disconnect();
