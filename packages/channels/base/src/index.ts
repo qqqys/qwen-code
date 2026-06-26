@@ -1,5 +1,6 @@
 export { getGlobalQwenDir, resolvePath } from './paths.js';
 export { AcpBridge } from './AcpBridge.js';
+export type { SessionBridge } from './SessionBridge.js';
 export type {
   AcpBridgeOptions,
   AvailableCommand,

@@ -4,7 +4,8 @@ import { GroupGate } from './GroupGate.js';
 import { SenderGate } from './SenderGate.js';
 import { PairingStore } from './PairingStore.js';
 import { SessionRouter } from './SessionRouter.js';
-import type { AcpBridge, ToolCallEvent } from './AcpBridge.js';
+import type { ToolCallEvent } from './AcpBridge.js';
+import type { SessionBridge } from './SessionBridge.js';
 
 export interface ChannelBaseOptions {
   router?: SessionRouter;
@@ -16,7 +17,7 @@ type CommandHandler = (envelope: Envelope, args: string) => Promise<boolean>;
 
 export abstract class ChannelBase {
   protected config: ChannelConfig;
-  protected bridge: AcpBridge;
+  protected bridge: SessionBridge;
   protected groupGate: GroupGate;
   protected gate: SenderGate;
   protected router: SessionRouter;
@@ -42,7 +43,7 @@ export abstract class ChannelBase {
   constructor(
     name: string,
     config: ChannelConfig,
-    bridge: AcpBridge,
+    bridge: SessionBridge,
     options?: ChannelBaseOptions,
   ) {
     this.name = name;
@@ -82,7 +83,7 @@ export abstract class ChannelBase {
   abstract disconnect(): void;
 
   /** Replace the bridge instance (used after crash recovery restart). */
-  setBridge(bridge: AcpBridge): void {
+  setBridge(bridge: SessionBridge): void {
     this.bridge = bridge;
   }
 

@@ -1,4 +1,4 @@
-import type { AcpBridge } from './AcpBridge.js';
+import type { SessionBridge } from './SessionBridge.js';
 import type { ChannelBase, ChannelBaseOptions } from './ChannelBase.js';
 
 export type SenderPolicy = 'allowlist' | 'pairing' | 'open';
@@ -119,7 +119,7 @@ export interface ChannelPlugin {
   createChannel(
     name: string,
     config: ChannelConfig & Record<string, unknown>,
-    bridge: AcpBridge,
+    bridge: SessionBridge,
     options?: ChannelBaseOptions,
   ): ChannelBase;
 }

@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { Readable, Writable } from 'node:stream';
 import { EventEmitter } from 'node:events';
+import type { SessionBridge } from './SessionBridge.js';
 import {
   ClientSideConnection,
   ndJsonStream,
@@ -35,7 +36,7 @@ export interface ToolCallEvent {
   rawInput?: Record<string, unknown>;
 }
 
-export class AcpBridge extends EventEmitter {
+export class AcpBridge extends EventEmitter implements SessionBridge {
   private child: ChildProcess | null = null;
   private connection: ClientSideConnection | null = null;
   private options: AcpBridgeOptions;

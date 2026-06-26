@@ -3,6 +3,7 @@ import type {
   RequestPermissionRequest,
   RequestPermissionResponse,
 } from '@agentclientprotocol/sdk';
+import type { SessionBridge } from './SessionBridge.js';
 import type { AvailableCommand, ToolCallEvent } from './AcpBridge.js';
 import type { SessionScope } from './types.js';
 
@@ -172,7 +173,7 @@ async function drainDaemonEventLoop(): Promise<void> {
   await new Promise<void>((resolve) => setTimeout(resolve, 0));
 }
 
-export class DaemonChannelBridge extends EventEmitter {
+export class DaemonChannelBridge extends EventEmitter implements SessionBridge {
   private readonly options: DaemonChannelBridgeOptions;
   private readonly sessions = new Map<string, DaemonChannelSessionClient>();
   private readonly eventControllers = new Map<string, AbortController>();
