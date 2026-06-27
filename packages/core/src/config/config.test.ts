@@ -2369,6 +2369,65 @@ describe('Server Config (config.ts)', () => {
     }
   });
 
+  it('blocks (does not swallow) a security rejection from the POST-PULL rebuild', async () => {
+    // A successful pull --ff-only can bring in a collaborator's malicious symlink
+    // at the team root. The post-pull rebuild must run through the SAME security
+    // gate as the first one: a TeamMemoryRootSecurityError there must be handled
+    // — discard the now-untrusted index — not swallowed by a bare catch that
+    // surfaces the stale pre-pull index as if the pulled root were safe.
+    const prevSync = process.env['QWEN_CODE_MEMORY_TEAM_SYNC'];
+    process.env['QWEN_CODE_MEMORY_TEAM_SYNC'] = '1';
+    try {
+      const config = new Config({
+        ...baseParams,
+        enableTeamMemory: true,
+        enableTeamMemorySync: true,
+      });
+      vi.spyOn(config, 'isTrustedFolder').mockReturnValue(true);
+      vi.mocked(loadServerHierarchicalMemory).mockResolvedValue({
+        memoryContent: '--- Context from: QWEN.md ---\nProject rules',
+        fileCount: 1,
+        ruleCount: 0,
+        conditionalRules: [],
+        projectRoot: '/tmp',
+      });
+      // First (pre-sync) rebuild succeeds, so sync runs; the pull reports new
+      // files; the SECOND (post-pull) rebuild hits the symlink-escape rejection.
+      vi.mocked(rebuildTeamAutoMemoryIndex)
+        .mockResolvedValueOnce(
+          '# Team Memory\n\n- [PrePull](prepull-shared.md) — before the pull',
+        )
+        .mockRejectedValueOnce(
+          new TeamMemoryRootSecurityError(
+            'Refusing to write team memory index: /tmp/.qwen/team-memory resolves ' +
+              'outside the repository — a parent symlink may be redirecting it.',
+          ),
+        );
+      vi.mocked(syncTeamMemory).mockResolvedValueOnce({
+        committed: false,
+        pulled: true,
+        pushed: false,
+      });
+
+      await config.refreshHierarchicalMemory();
+
+      // Both rebuilds ran and the sync happened once.
+      expect(rebuildTeamAutoMemoryIndex).toHaveBeenCalledTimes(2);
+      expect(syncTeamMemory).toHaveBeenCalledTimes(1);
+      // Mutation proof: revert the post-pull gate to the old bare
+      // `.catch(() => teamAutoMemoryIndex)` and the stale pre-pull index leaks
+      // into the prompt. The security block must discard it instead.
+      expect(config.getUserMemory()).not.toContain('prepull-shared.md');
+      expect(config.getUserMemory()).not.toContain('before the pull');
+    } finally {
+      if (prevSync === undefined) {
+        delete process.env['QWEN_CODE_MEMORY_TEAM_SYNC'];
+      } else {
+        process.env['QWEN_CODE_MEMORY_TEAM_SYNC'] = prevSync;
+      }
+    }
+  });
+
   it('refreshHierarchicalMemory surfaces a one-time warning when team memory is not git-shareable', async () => {
     const config = new Config({ ...baseParams, enableTeamMemory: true });
     vi.spyOn(config, 'isTrustedFolder').mockReturnValue(true);

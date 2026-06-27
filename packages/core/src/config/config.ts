@@ -2342,34 +2342,17 @@ export class Config {
       // PULLED new files, rebuild once more so the in-prompt index reflects them.
       let teamAutoMemoryIndex: string | null = null;
       if (teamMemoryEnabled) {
-        // rebuildTeamAutoMemoryIndex throws for two distinct classes, and only
-        // ONE may block sync:
-        //   • SECURITY — a symlink/escape rejection (TeamMemoryRootSecurityError)
-        //     means the team root could redirect the committed index OUTSIDE the
-        //     repo. Sync MUST be blocked: otherwise syncTeamMemory would git
-        //     add/commit/push that out-of-repo dir, defeating the indexer's
-        //     refusal. This invariant is non-negotiable.
-        //   • OPERATIONAL — EACCES/ENOSPC/EPERM on lstat/readdir/write. Not a
-        //     security problem, so it must NOT permanently gate legitimate sync;
-        //     it self-corrects on the next successful rebuild. Log and sync on.
-        let teamRootSecurityBlocked = false;
-        try {
-          teamAutoMemoryIndex =
-            await rebuildTeamAutoMemoryIndex(teamProjectRoot);
-        } catch (err) {
-          if (err instanceof TeamMemoryRootSecurityError) {
-            teamRootSecurityBlocked = true;
-            this.debugLogger.warn(
-              'team memory root failed the symlink/escape safety check; skipping sync',
-              err,
-            );
-          } else {
-            this.debugLogger.warn(
-              'team memory index rebuild failed (operational); not security-gating sync',
-              err,
-            );
-          }
-        }
+        // Both rebuilds (pre-sync here and the post-pull one below) route through
+        // rebuildTeamIndexWithSecurityGate so the indexer's two failure classes
+        // are handled identically: a SECURITY rejection (symlink/escape) blocks
+        // sync — never add/commit/push a root that escapes the repo — while an
+        // OPERATIONAL failure self-corrects next run and must not gate sync.
+        const firstRebuild = await this.rebuildTeamIndexWithSecurityGate(
+          teamProjectRoot,
+          null,
+        );
+        teamAutoMemoryIndex = firstRebuild.index;
+        let teamRootSecurityBlocked = firstRebuild.securityBlocked;
         if (!teamRootSecurityBlocked && this.getTeamMemorySyncEnabled()) {
           const syncResult = await syncTeamMemory(teamProjectRoot, {
             message: 'chore(memory): sync team memory',
@@ -2387,9 +2370,17 @@ export class Config {
             );
           }
           if (syncResult?.pulled) {
-            teamAutoMemoryIndex = await rebuildTeamAutoMemoryIndex(
+            // pull --ff-only may have introduced a collaborator's malicious
+            // symlink at the team root, so re-gate identically: a security
+            // rejection discards the now-untrusted index (never fall back to the
+            // pre-pull one as if safe) and records the block; an operational
+            // failure keeps the pre-pull index and self-corrects next run.
+            const postPullRebuild = await this.rebuildTeamIndexWithSecurityGate(
               teamProjectRoot,
-            ).catch(() => teamAutoMemoryIndex);
+              teamAutoMemoryIndex,
+            );
+            teamAutoMemoryIndex = postPullRebuild.index;
+            teamRootSecurityBlocked = postPullRebuild.securityBlocked;
           }
         }
       }
@@ -2427,6 +2418,45 @@ export class Config {
       conditionalRules,
       projectRoot,
     );
+  }
+
+  /**
+   * Rebuild the team-memory index, classifying its two failure modes into a
+   * sync gate. {@link rebuildTeamAutoMemoryIndex} throws
+   * {@link TeamMemoryRootSecurityError} when the team root could redirect the
+   * committed index OUTSIDE the repo (a symlink/escape): that is a SECURITY
+   * rejection — discard the index and report `securityBlocked` so the caller
+   * never syncs (add/commit/push) an escaping root and never presents a stale
+   * index as if the root were safe. Any other (OPERATIONAL: EACCES/ENOSPC/EPERM)
+   * failure is logged and `fallbackIndex` is returned unchanged — it
+   * self-corrects on the next rebuild and must not permanently gate sync. Used
+   * for BOTH the pre-sync rebuild and the post-pull rebuild (a pulled update can
+   * introduce a malicious symlink), so both classify the security case the same.
+   */
+  private async rebuildTeamIndexWithSecurityGate(
+    projectRoot: string,
+    fallbackIndex: string | null,
+  ): Promise<{ index: string | null; securityBlocked: boolean }> {
+    try {
+      return {
+        index: await rebuildTeamAutoMemoryIndex(projectRoot),
+        securityBlocked: false,
+      };
+    } catch (err) {
+      if (err instanceof TeamMemoryRootSecurityError) {
+        this.debugLogger.warn(
+          'team memory root failed the symlink/escape safety check (security); ' +
+            'gating sync and discarding the team index',
+          err,
+        );
+        return { index: null, securityBlocked: true };
+      }
+      this.debugLogger.warn(
+        'team memory index rebuild failed (operational); not security-gating sync',
+        err,
+      );
+      return { index: fallbackIndex, securityBlocked: false };
+    }
   }
 
   private buildMemoryContextWarning(memoryContent: string): string | undefined {

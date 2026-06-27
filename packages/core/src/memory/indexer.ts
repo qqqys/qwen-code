@@ -105,7 +105,19 @@ function encodeIndexPathTarget(value: string): string {
   return out;
 }
 
-function docIndexLine(doc: ScannedAutoMemoryDocument): string {
+/**
+ * Render one index entry line. The TEAM (shared, committed) index passes
+ * `harden` because its title/description/path are attacker-controlled — a
+ * collaborator's malicious frontmatter or filename loads verbatim into every
+ * teammate's prompt — so the fields are sanitized and the path target is
+ * percent-encoded. The PRIVATE user/project index is the user's OWN files with
+ * no injection threat, so it renders raw (the pre-hardening form); percent-
+ * encoding tool-generated slug paths only made those links uglier for no gain.
+ */
+function docIndexLine(doc: ScannedAutoMemoryDocument, harden = false): string {
+  if (!harden) {
+    return `- [${doc.title}](${doc.relativePath}) — ${doc.description || doc.type}`;
+  }
   const title = sanitizeIndexField(doc.title) || doc.type;
   const description = sanitizeIndexField(doc.description) || doc.type;
   return `- [${title}](${encodeIndexPathTarget(doc.relativePath)}) — ${description}`;
@@ -197,7 +209,7 @@ function groupTeamDocsByDescription(
 }
 
 function teamGroupIndexLine(group: TeamIndexGroup): string {
-  const base = docIndexLine(group.primary);
+  const base = docIndexLine(group.primary, true);
   if (group.others.length === 0) {
     return truncateIndexLine(base);
   }
