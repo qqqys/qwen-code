@@ -2677,6 +2677,43 @@ describe('Session', () => {
       );
     });
 
+    it('discloses voice bridge egress when the turn is aborted after audio upload', async () => {
+      mockConfig.getEffectiveInputModalities = vi.fn().mockReturnValue({});
+      mockChat.sendMessageStream = vi
+        .fn()
+        .mockResolvedValue(createEmptyStream());
+      Object.assign(mockSettings.merged as Record<string, unknown>, {
+        voiceModel: 'qwen3-asr-flash',
+      });
+      transcribeVoiceAudioSpy.mockImplementation(
+        async (
+          _audio: unknown,
+          args: { onEgress?: () => void },
+        ): Promise<string> => {
+          args.onEgress?.();
+          await session.cancelPendingPrompt();
+          return 'transcript after cancellation';
+        },
+      );
+
+      await session.prompt({
+        sessionId: 'test-session-id',
+        prompt: [
+          { type: 'text', text: 'caption before audio' },
+          {
+            type: 'audio',
+            mimeType: 'audio/ogg',
+            data: 'T2dnUw==',
+          },
+        ],
+      });
+
+      expect(agentMessageChunks()).toContain(
+        'Sent 1 audio file(s) to qwen3-asr-flash for transcription, but no transcript was produced.',
+      );
+      expect(mockChat.sendMessageStream).not.toHaveBeenCalled();
+    });
+
     it('rejects oversized ACP audio before decoding for the voice bridge', async () => {
       const ENV_KEY = 'QWEN_CODE_MAX_INLINE_MEDIA_BYTES';
       const original = process.env[ENV_KEY];
@@ -2724,6 +2761,7 @@ describe('Session', () => {
         .mockResolvedValue(createEmptyStream());
       Object.assign(mockSettings.merged as Record<string, unknown>, {
         voiceModel: 'qwen3-asr-flash',
+        env: { OPENAI_API_KEY: 'plain-secret-token' },
       });
       transcribeVoiceAudioSpy.mockImplementation(
         async (
@@ -2731,7 +2769,7 @@ describe('Session', () => {
           args: { onEgress?: () => void },
         ): Promise<string> => {
           args.onEgress?.();
-          throw new Error('asr unavailable: Bearer sk-secret-token');
+          throw new Error('asr unavailable: plain-secret-token');
         },
       );
 
@@ -2752,7 +2790,10 @@ describe('Session', () => {
       expect(textParts(sent).join('\n')).toContain('caption before audio');
       expect(textParts(sent).join('\n')).toMatch(/could not transcribe/i);
       expect(debugLoggerDebugSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Bearer [REDACTED]'),
+        expect.stringContaining('asr unavailable: [REDACTED]'),
+      );
+      expect(debugLoggerDebugSpy).not.toHaveBeenCalledWith(
+        expect.stringContaining('plain-secret-token'),
       );
       expect(agentMessageChunks()).toContain(
         'Sent 1 audio file(s) to qwen3-asr-flash for transcription, but no transcript was produced.',

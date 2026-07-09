@@ -5772,6 +5772,22 @@ export class Session implements SessionContext {
     const converted: Part[] = [];
     let transcribedCount = 0;
     let egressCount = 0;
+    const emitVoiceBridgeNotice = async (egressOnly = false) => {
+      if (transcribedCount === 0 && egressCount === 0) {
+        return;
+      }
+      try {
+        await this.messageEmitter.emitAgentMessage(
+          !egressOnly && transcribedCount > 0
+            ? this.#formatVoiceBridgeNotice(voiceModel, transcribedCount)
+            : this.#formatVoiceBridgeEgressNotice(voiceModel, egressCount),
+        );
+      } catch (error) {
+        debugLogger.debug(
+          `voice bridge: failed to emit notice; continuing with bridge result error=${String(error instanceof Error ? error.message : error)}`,
+        );
+      }
+    };
     for (const part of parts) {
       if (!isAudioPart(part)) {
         converted.push(part);
@@ -5809,6 +5825,7 @@ export class Session implements SessionContext {
 
         if (abortSignal.aborted) {
           debugLogger.debug('voice bridge: turn aborted after transcription');
+          await emitVoiceBridgeNotice(true);
           return converted;
         }
 
@@ -5826,10 +5843,11 @@ export class Session implements SessionContext {
       } catch (error) {
         if (abortSignal.aborted) {
           debugLogger.debug('voice bridge: transcription cancelled');
+          await emitVoiceBridgeNotice(true);
           return converted;
         }
         debugLogger.debug(
-          `voice bridge: transcription failed; replacing audio with note error=${sanitizeVoiceErrorMessage(String(error instanceof Error ? error.message : error))}`,
+          `voice bridge: transcription failed; replacing audio with note error=${sanitizeVoiceErrorMessage(String(error instanceof Error ? error.message : error), this.settings.merged?.env?.['OPENAI_API_KEY'])}`,
         );
         converted.push({
           text: buildVoiceUnavailableBlock('the voice model request failed'),
@@ -5837,19 +5855,7 @@ export class Session implements SessionContext {
       }
     }
 
-    if (transcribedCount > 0 || egressCount > 0) {
-      try {
-        await this.messageEmitter.emitAgentMessage(
-          transcribedCount > 0
-            ? this.#formatVoiceBridgeNotice(voiceModel, transcribedCount)
-            : this.#formatVoiceBridgeEgressNotice(voiceModel, egressCount),
-        );
-      } catch (error) {
-        debugLogger.debug(
-          `voice bridge: failed to emit notice; continuing with bridge result error=${String(error instanceof Error ? error.message : error)}`,
-        );
-      }
-    }
+    await emitVoiceBridgeNotice();
 
     return converted;
   }
