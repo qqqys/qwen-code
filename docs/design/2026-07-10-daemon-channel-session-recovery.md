@@ -66,8 +66,9 @@ The daemon-managed store path is:
 <global-qwen-dir>/channels/daemon/<workspace-hash>/routes.json
 ```
 
-`workspace-hash` is the SHA-256 hash of the canonical daemon workspace. The
-daemon store does not reuse the standalone channel
+`workspace-hash` is the stable 16-hex SHA-256 prefix produced by the existing
+`hashDaemonWorkspace()` helper for the canonical daemon workspace. The daemon
+store does not reuse the standalone channel
 `<global-qwen-dir>/channels/sessions.json`. Its directory is created with mode
 `0700` and the route file with mode `0600` where the platform supports POSIX
 permissions.
@@ -121,14 +122,20 @@ route live
 route dormant
   -> loadSession(saved sessionId, cwd)
   -> success: mark live and continue
-  -> failure: remove the stale entry, create a replacement session,
-     mark live, persist, and continue
+  -> failure: keep the old route dormant while creating a replacement
+  -> replacement success: atomically replace the route, mark live,
+     persist, and continue
+  -> replacement failure: retain the old dormant route and surface the error
 ```
 
 Loads and creates are coalesced per route through the router's existing
 in-flight reservation mechanism. Concurrent messages for one dormant route
 wait for the same load or replacement; they cannot create duplicate sessions.
 Different routes may resolve independently.
+
+The old durable entry is not removed before its replacement exists. This keeps
+a transient daemon capacity or network failure from destroying a session that
+may be loadable on the next message.
 
 Lazy loading avoids consuming the daemon's live-session limit for quiet
 historical groups and keeps worker startup time independent of the number of
@@ -150,9 +157,10 @@ same operation to destructive removal.
 
 Routine worker shutdown and daemon shutdown disconnect channels, stop the
 bridge, and dispose in-memory router state while retaining `routes.json`.
-Explicit `/clear`, a failed lazy load, or an explicit destructive router
-operation removes the affected durable entry. Full route-store deletion remains
-an explicit destructive operation rather than a normal lifecycle action.
+Explicit `/clear`, a successfully created replacement after a failed lazy load,
+or an explicit destructive router operation removes or replaces the affected
+durable entry. Full route-store deletion remains an explicit destructive
+operation rather than a normal lifecycle action.
 
 An in-flight prompt may be interrupted by a restart. The design only guarantees
 that a later message reloads the same conversation when its transcript remains
@@ -209,7 +217,7 @@ Focused tests must cover:
 - The first message loads the original session ID; a second message reuses the
   live binding.
 - Concurrent first messages issue one load and, on failure, one replacement
-  create.
+  create. If replacement creation also fails, the old route remains dormant.
 - `bridge_stopped`, stream termination, and daemon session death preserve the
   durable route while clearing transient channel state.
 - Normal worker close and startup rollback retain the route file.
@@ -230,8 +238,9 @@ Final verification runs the focused package tests, then
    `thread` route loads and uses the previous session ID.
 2. Worker startup does not load every persisted agent session.
 3. A runtime session death leaves the route dormant and recoverable.
-4. A failed lazy load replaces only that route with a new session and continues
-   processing the triggering message.
+4. A failed lazy load replaces only that route after a new session is created
+   successfully and then continues processing the triggering message. If both
+   load and create fail, the old route remains dormant.
 5. `/clear` removes the matching persisted route, and the next message creates
    a new session.
 6. Daemon-managed and standalone channel processes cannot overwrite each
