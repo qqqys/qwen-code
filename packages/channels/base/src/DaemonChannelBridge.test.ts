@@ -76,6 +76,7 @@ class EventQueue implements AsyncGenerator<DaemonChannelEvent> {
 
 interface FakeSession extends DaemonChannelSessionClient {
   prompt: ReturnType<typeof vi.fn>;
+  submitPrompt?: ReturnType<typeof vi.fn>;
   events: ReturnType<typeof vi.fn>;
   cancel: ReturnType<typeof vi.fn>;
   setModel: ReturnType<typeof vi.fn>;
@@ -128,6 +129,17 @@ function turnCompleteEvent(sessionId = 'session-1'): DaemonChannelEvent {
     v: 1,
     type: 'turn_complete',
     data: { sessionId, stopReason: 'end_turn' },
+  };
+}
+
+function promptTurnCompleteEvent(
+  promptId: string,
+  sessionId = 'session-1',
+): DaemonChannelEvent {
+  return {
+    v: 1,
+    type: 'turn_complete',
+    data: { sessionId, promptId, stopReason: 'end_turn' },
   };
 }
 
@@ -251,6 +263,179 @@ describe('DaemonChannelBridge', () => {
 
     events.close();
     bridge.stop();
+  });
+
+  it('waits for the accepted prompt terminal event before returning chunks', async () => {
+    const events = new EventQueue();
+    const session = createFakeSession(events);
+    session.submitPrompt = vi.fn().mockResolvedValue({
+      promptId: 'prompt-1',
+      lastEventId: 0,
+    });
+    const bridge = new DaemonChannelBridge({
+      cwd: '/repo',
+      sessionFactory: vi.fn().mockResolvedValue(session),
+    });
+
+    await bridge.start();
+    await bridge.newSession('/repo');
+
+    let settled = false;
+    const promptPromise = bridge
+      .prompt('session-1', 'summarize')
+      .finally(() => {
+        settled = true;
+      });
+    await waitFor(() => expect(session.submitPrompt).toHaveBeenCalledOnce());
+    await drainMicrotasks();
+
+    events.push({
+      v: 1,
+      type: 'session_update',
+      data: {
+        sessionId: 'session-1',
+        update: {
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: 'old step' },
+        },
+      },
+    });
+    events.push({
+      v: 1,
+      type: 'session_update',
+      data: {
+        sessionId: 'session-1',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'tool-1',
+          kind: 'read',
+          title: 'Read file',
+          status: 'in_progress',
+        },
+      },
+    });
+    events.push({
+      v: 1,
+      type: 'session_update',
+      data: {
+        sessionId: 'session-1',
+        update: {
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: 'Detailed final answer.' },
+        },
+      },
+    });
+    await drainMicrotasks();
+    expect(settled).toBe(false);
+
+    events.push(promptTurnCompleteEvent('other-prompt'));
+    await drainMicrotasks();
+    expect(settled).toBe(false);
+
+    events.push({
+      v: 1,
+      type: 'turn_complete',
+      data: { sessionId: 'session-1', stopReason: 'end_turn' },
+    });
+    await drainMicrotasks();
+    expect(settled).toBe(false);
+
+    events.push(promptTurnCompleteEvent('prompt-1'));
+    await expect(promptPromise).resolves.toBe('Detailed final answer.');
+    expect(session.prompt).not.toHaveBeenCalled();
+
+    events.close();
+    bridge.stop();
+  });
+
+  it('rejects an accepted prompt when its matching turn fails', async () => {
+    const events = new EventQueue();
+    const session = createFakeSession(events);
+    session.submitPrompt = vi.fn().mockResolvedValue({
+      promptId: 'prompt-1',
+      lastEventId: 0,
+    });
+    const bridge = new DaemonChannelBridge({
+      cwd: '/repo',
+      sessionFactory: vi.fn().mockResolvedValue(session),
+    });
+
+    await bridge.start();
+    await bridge.newSession('/repo');
+
+    const promptPromise = bridge.prompt('session-1', 'summarize');
+    await waitFor(() => expect(session.submitPrompt).toHaveBeenCalledOnce());
+    events.push({
+      v: 1,
+      type: 'turn_error',
+      data: {
+        sessionId: 'session-1',
+        promptId: 'prompt-1',
+        message: 'model overloaded',
+        code: 'overloaded',
+      },
+    });
+
+    await expect(promptPromise).rejects.toThrow('model overloaded');
+
+    events.close();
+    bridge.stop();
+  });
+
+  it('keeps a terminal event delivered before prompt acceptance', async () => {
+    const events = new EventQueue();
+    const session = createFakeSession(events);
+    let resolveAdmission:
+      | ((value: { promptId: string; lastEventId: number }) => void)
+      | undefined;
+    session.submitPrompt = vi.fn().mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveAdmission = resolve;
+        }),
+    );
+    const bridge = new DaemonChannelBridge({
+      cwd: '/repo',
+      sessionFactory: vi.fn().mockResolvedValue(session),
+    });
+
+    await bridge.start();
+    await bridge.newSession('/repo');
+
+    let settled = false;
+    const promptPromise = bridge
+      .prompt('session-1', 'summarize')
+      .finally(() => {
+        settled = true;
+      });
+    try {
+      await waitFor(() => expect(session.submitPrompt).toHaveBeenCalledOnce());
+      events.push({
+        v: 1,
+        type: 'session_update',
+        data: {
+          sessionId: 'session-1',
+          update: {
+            sessionUpdate: 'agent_message_chunk',
+            content: { type: 'text', text: 'Detailed final answer.' },
+          },
+        },
+      });
+      events.push(promptTurnCompleteEvent('prompt-1'));
+      await drainMicrotasks();
+      expect(settled).toBe(false);
+
+      resolveAdmission?.({ promptId: 'prompt-1', lastEventId: 0 });
+      await waitFor(() => expect(settled).toBe(true));
+      await expect(promptPromise).resolves.toBe('Detailed final answer.');
+    } finally {
+      if (!settled) {
+        await bridge.cancelSession('session-1');
+        await promptPromise.catch(() => undefined);
+      }
+      events.close();
+      bridge.stop();
+    }
   });
 
   it('passes approval mode to the session factory', async () => {

@@ -40,6 +40,13 @@ export interface DaemonChannelSessionClient {
     },
     signal?: AbortSignal,
   ): Promise<{ stopReason?: string; [key: string]: unknown }>;
+  submitPrompt?(
+    req: {
+      prompt: Array<Record<string, unknown>>;
+      _meta?: Record<string, unknown>;
+    },
+    signal?: AbortSignal,
+  ): Promise<{ promptId: string; lastEventId: number; eventEpoch?: string }>;
   events(opts?: {
     signal?: AbortSignal;
     lastEventId?: number;
@@ -162,6 +169,17 @@ type DaemonPermissionOutcome =
   | { outcome: 'cancelled' }
   | { outcome: 'selected'; optionId: string };
 
+type DaemonTurnBarrier = {
+  promptId?: string;
+  pendingTerminals: Map<string, DaemonTurnTerminal>;
+  resolve: (result: { stopReason?: string }) => void;
+  reject: (error: unknown) => void;
+};
+
+type DaemonTurnTerminal =
+  | { kind: 'complete'; data: unknown }
+  | { kind: 'error'; data: unknown };
+
 function parsePermissionOutcome(
   value: unknown,
 ): DaemonPermissionOutcome | undefined {
@@ -221,7 +239,7 @@ export class DaemonChannelBridge
     string,
     AvailableCommand[]
   >();
-  private readonly turnBarriers = new Map<string, () => void>();
+  private readonly turnBarriers = new Map<string, DaemonTurnBarrier>();
   private readonly channelLoopToolHandlers: ChannelLoopToolHandler[] = [];
   private readonly registeredChannelLoopMcpSessions = new Set<string>();
   private readonly channelLoopMcpRegistrations = new Map<
@@ -393,8 +411,6 @@ export class DaemonChannelBridge
     this.on('slashCommandOutput', onSlashCommandOutput);
     this.on('responseBoundary', clearChunks);
     this.on('sessionDied', onSessionDied);
-    const turnBarrier = this.createTurnBarrier(sessionId);
-
     const prompt: Array<Record<string, unknown>> = [];
     if (options?.imageBase64 && options.imageMimeType) {
       prompt.push({
@@ -406,20 +422,20 @@ export class DaemonChannelBridge
     prompt.push({ type: 'text', text });
 
     try {
-      const result = await session.prompt(
-        {
-          prompt,
-          _meta: { [CHANNEL_PROMPT_META_KEY]: true },
-        },
-        controller.signal,
-      );
-      // Prefer turn_complete for deterministic chunk collection (SSE path).
-      // Fall back to one event-loop tick for non-SSE prompt paths (blocking
-      // HTTP, non-202 responses) where turn_complete never arrives.
-      await Promise.race([
-        turnBarrier,
-        new Promise<void>((resolve) => setTimeout(resolve, 0)),
-      ]);
+      const request = {
+        prompt,
+        _meta: { [CHANNEL_PROMPT_META_KEY]: true },
+      };
+      const result = session.submitPrompt
+        ? await this.promptUntilTerminalEvent(
+            session,
+            request,
+            controller.signal,
+          )
+        : await session.prompt(request, controller.signal);
+      if (!session.submitPrompt) {
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      }
       const textResult = chunks.join('') || slashCommandOutput;
       this.emit('promptComplete', {
         sessionId,
@@ -672,14 +688,14 @@ export class DaemonChannelBridge
         );
         break;
       case 'turn_complete':
-        this.resolveTurnBarrier(session.sessionId);
+        this.resolveTurnBarrier(session.sessionId, event.data);
         break;
       case 'turn_error':
         this.emitProtocolError(
           `Daemon turn error for session ${session.sessionId}`,
           event.data,
         );
-        this.resolveTurnBarrier(session.sessionId);
+        this.rejectTurnBarrier(session.sessionId, event.data);
         break;
       default:
         break;
@@ -1046,18 +1062,107 @@ export class DaemonChannelBridge
     this.emit('responseBoundary', sessionId);
   }
 
-  private createTurnBarrier(sessionId: string): Promise<void> {
-    return new Promise<void>((resolve) => {
-      this.turnBarriers.set(sessionId, resolve);
+  private async promptUntilTerminalEvent(
+    session: DaemonChannelSessionClient,
+    request: {
+      prompt: Array<Record<string, unknown>>;
+      _meta?: Record<string, unknown>;
+    },
+    signal: AbortSignal,
+  ): Promise<{ stopReason?: string }> {
+    let barrier: DaemonTurnBarrier;
+    const terminal = new Promise<{ stopReason?: string }>((resolve, reject) => {
+      barrier = {
+        pendingTerminals: new Map(),
+        resolve,
+        reject,
+      };
+      this.turnBarriers.set(session.sessionId, barrier);
+    });
+
+    try {
+      const accepted = await session.submitPrompt!(request, signal);
+      if (this.turnBarriers.get(session.sessionId) === barrier!) {
+        barrier!.promptId = accepted.promptId;
+        const pending = barrier!.pendingTerminals.get(accepted.promptId);
+        barrier!.pendingTerminals.clear();
+        if (pending) {
+          this.settleTurnBarrier(session.sessionId, barrier!, pending);
+        }
+      }
+      return await terminal;
+    } catch (error: unknown) {
+      if (this.turnBarriers.get(session.sessionId) === barrier!) {
+        this.clearTurnBarrier(session.sessionId);
+      }
+      throw error;
+    }
+  }
+
+  private resolveTurnBarrier(sessionId: string, data?: unknown): void {
+    const barrier = this.turnBarriers.get(sessionId);
+    if (!barrier) return;
+    if (data === undefined) {
+      this.settleTurnBarrier(sessionId, barrier, {
+        kind: 'complete',
+        data,
+      });
+      return;
+    }
+    this.handleTurnTerminal(sessionId, barrier, {
+      kind: 'complete',
+      data,
     });
   }
 
-  private resolveTurnBarrier(sessionId: string): void {
-    const resolve = this.turnBarriers.get(sessionId);
-    if (resolve) {
-      this.turnBarriers.delete(sessionId);
-      resolve();
+  private rejectTurnBarrier(sessionId: string, data: unknown): void {
+    const barrier = this.turnBarriers.get(sessionId);
+    if (!barrier) return;
+    this.handleTurnTerminal(sessionId, barrier, { kind: 'error', data });
+  }
+
+  private handleTurnTerminal(
+    sessionId: string,
+    barrier: DaemonTurnBarrier,
+    terminal: DaemonTurnTerminal,
+  ): void {
+    const promptId = isRecord(terminal.data)
+      ? getString(terminal.data['promptId'])
+      : undefined;
+    if (!promptId) return;
+    if (!barrier.promptId) {
+      if (!barrier.pendingTerminals.has(promptId)) {
+        barrier.pendingTerminals.set(promptId, terminal);
+      }
+      return;
     }
+    if (promptId === barrier.promptId) {
+      this.settleTurnBarrier(sessionId, barrier, terminal);
+    }
+  }
+
+  private settleTurnBarrier(
+    sessionId: string,
+    barrier: DaemonTurnBarrier,
+    terminal: DaemonTurnTerminal,
+  ): void {
+    if (this.turnBarriers.get(sessionId) !== barrier) return;
+    this.turnBarriers.delete(sessionId);
+    if (terminal.kind === 'complete') {
+      barrier.resolve({
+        stopReason: isRecord(terminal.data)
+          ? getString(terminal.data['stopReason'])
+          : undefined,
+      });
+      return;
+    }
+    barrier.reject(
+      new Error(
+        isRecord(terminal.data) && getString(terminal.data['message'])
+          ? getString(terminal.data['message'])
+          : `Daemon turn failed for session ${sessionId}`,
+      ),
+    );
   }
 
   private clearTurnBarrier(sessionId: string): void {
