@@ -1,7 +1,22 @@
 import { createHash } from 'node:crypto';
+import {
+  closeSync,
+  constants,
+  fstatSync,
+  openSync,
+  readSync,
+  realpathSync,
+  statSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { basename, extname, isAbsolute, relative, sep } from 'node:path';
+import { DingTalkMediaUploadError } from './outbound-image.js';
 
 const FILE_OPENING = '[FILE:';
+const MEDIA_UPLOAD_API = 'https://oapi.dingtalk.com/media/upload';
+const MEDIA_UPLOAD_TIMEOUT_MS = 30_000;
 const MAX_FILE_PATH_CHARS = 4096;
+const MAX_FILE_BYTES = 20 * 1024 * 1024;
 export const MAX_FILES_PER_RESPONSE = 5;
 
 export interface FileProjection {
@@ -10,6 +25,12 @@ export interface FileProjection {
   invalidMarkers: number;
   excessMarkers: number;
   markerCount: number;
+}
+
+export interface ValidatedFile {
+  data: Buffer;
+  fileName: string;
+  fileType: string;
 }
 
 export class OutboundFileProjector {
@@ -124,4 +145,118 @@ export function projectFileText(text: string): FileProjection {
   const projector = new OutboundFileProjector();
   const safe = projector.append(text) + projector.complete();
   return projector.result(safe);
+}
+
+export function safeFileName(filePath: string): string {
+  return (
+    basename(filePath)
+      .replace(/[\p{Cc}\p{Cf}[\]]+/gu, '_')
+      .slice(0, 200) || 'file'
+  );
+}
+
+function isInside(filePath: string, directory: string): boolean {
+  const child = relative(directory, filePath);
+  return (
+    child === '' ||
+    (!isAbsolute(child) && child !== '..' && !child.startsWith(`..${sep}`))
+  );
+}
+
+export function readValidatedFile(
+  filePath: string,
+  workspaceDir: string,
+): ValidatedFile {
+  if (!isAbsolute(filePath)) throw new Error('File path must be absolute');
+  let realPath: string;
+  try {
+    realPath = realpathSync(filePath);
+  } catch {
+    throw new Error('File not found');
+  }
+  const roots = [realpathSync(workspaceDir), realpathSync(tmpdir())];
+  if (!roots.some((root) => isInside(realPath, root))) {
+    throw new Error('File path outside allowed directories');
+  }
+  if (!statSync(realPath).isFile()) throw new Error('Not a regular file');
+  const descriptor = openSync(
+    realPath,
+    constants.O_RDONLY | constants.O_NONBLOCK | (constants.O_NOFOLLOW ?? 0),
+  );
+  try {
+    const stats = fstatSync(descriptor);
+    if (!stats.isFile()) throw new Error('Not a regular file');
+    if (stats.size === 0) throw new Error('File is empty');
+    if (stats.size > MAX_FILE_BYTES) throw new Error('File is too large');
+    const fileName = safeFileName(realPath);
+    const data = Buffer.allocUnsafe(stats.size + 1);
+    let bytesRead = 0;
+    while (bytesRead < data.length) {
+      const size = readSync(
+        descriptor,
+        data,
+        bytesRead,
+        data.length - bytesRead,
+        bytesRead,
+      );
+      if (size === 0) break;
+      bytesRead += size;
+    }
+    if (bytesRead !== stats.size) throw new Error('File changed while read');
+    return {
+      data: data.subarray(0, bytesRead),
+      fileName,
+      fileType: extname(fileName).slice(1).toLowerCase() || 'file',
+    };
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
+export async function uploadDingTalkFile(
+  file: ValidatedFile,
+  accessToken: string,
+): Promise<string> {
+  const form = new FormData();
+  form.append(
+    'media',
+    new Blob([file.data], { type: 'application/octet-stream' }),
+    file.fileName,
+  );
+  let response: Response;
+  try {
+    const url = new URL(MEDIA_UPLOAD_API);
+    url.searchParams.set('access_token', accessToken);
+    url.searchParams.set('type', 'file');
+    response = await fetch(url, {
+      method: 'POST',
+      body: form,
+      signal: AbortSignal.timeout(MEDIA_UPLOAD_TIMEOUT_MS),
+    });
+  } catch {
+    throw new DingTalkMediaUploadError(
+      'DingTalk file upload failed: network request failed',
+      false,
+    );
+  }
+  const payload = (await response.json().catch(() => ({}))) as Record<
+    string,
+    unknown
+  >;
+  const errcode =
+    typeof payload['errcode'] === 'number' ? payload['errcode'] : undefined;
+  if (!response.ok || (errcode !== undefined && errcode !== 0)) {
+    throw new DingTalkMediaUploadError(
+      `DingTalk file upload failed: HTTP ${response.status}`,
+      response.status === 401 || errcode === 40014 || errcode === 42001,
+    );
+  }
+  const mediaId = payload['media_id'] ?? payload['mediaId'];
+  if (typeof mediaId !== 'string' || !mediaId) {
+    throw new DingTalkMediaUploadError(
+      'DingTalk file upload failed: response did not include a MediaID',
+      false,
+    );
+  }
+  return mediaId;
 }

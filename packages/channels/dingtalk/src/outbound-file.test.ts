@@ -1,8 +1,13 @@
-import { describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync, truncateSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   MAX_FILES_PER_RESPONSE,
   OutboundFileProjector,
   projectFileText,
+  readValidatedFile,
+  uploadDingTalkFile,
 } from './outbound-file.js';
 
 describe('OutboundFileProjector', () => {
@@ -10,10 +15,10 @@ describe('OutboundFileProjector', () => {
     const input = 'before\n[FILE: /workspace/report.txt]\nafter';
     for (let split = 0; split <= '[FILE:'.length; split++) {
       const projector = new OutboundFileProjector();
-      const opening = input.indexOf('[FILE:');
+      const first = input.indexOf('[FILE:');
       const chunks = [
-        input.slice(0, opening + split),
-        input.slice(opening + split),
+        input.slice(0, first + split),
+        input.slice(first + split),
       ];
       const safeChunks = chunks.map((chunk) => projector.append(chunk));
       const safe = safeChunks.join('') + projector.complete();
@@ -87,5 +92,59 @@ describe('OutboundFileProjector', () => {
     projector.append('[FILE: /tmp/a.txt]');
     projector.complete();
     expect(projector.matches('[FILE: /tmp/b.txt]')).toBe(false);
+  });
+});
+
+describe('outbound file validation and upload', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('reads a non-empty regular file under the workspace', () => {
+    const workspace = process.cwd();
+    const file = readValidatedFile(join(workspace, 'package.json'), workspace);
+    expect(file).toMatchObject({
+      fileName: 'package.json',
+      fileType: 'json',
+    });
+    expect(file.data.length).toBeGreaterThan(0);
+  });
+
+  it.each([
+    ['relative path', 'report.txt', 'File path must be absolute'],
+    ['outside root', process.execPath, 'outside allowed directories'],
+  ])('rejects a %s', (_name, path, message) => {
+    expect(() => readValidatedFile(path, tmpdir())).toThrow(message);
+  });
+
+  it('rejects empty, directory, and oversized files', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'dingtalk-file-bounds-'));
+    const empty = join(dir, 'empty.txt');
+    const large = join(dir, 'large.bin');
+    writeFileSync(empty, '');
+    writeFileSync(large, 'x');
+    truncateSync(large, 20 * 1024 * 1024 + 1);
+    try {
+      expect(() => readValidatedFile(empty, dir)).toThrow('File is empty');
+      expect(() => readValidatedFile(dir, dir)).toThrow('Not a regular file');
+      expect(() => readValidatedFile(large, dir)).toThrow('File is too large');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('uploads as file media and returns the media id', async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(
+        new Response(JSON.stringify({ errcode: 0, media_id: '@file-id' })),
+      );
+    await expect(
+      uploadDingTalkFile(
+        { data: Buffer.from('x'), fileName: 'a.txt', fileType: 'txt' },
+        'secret',
+      ),
+    ).resolves.toBe('@file-id');
+    expect(String(fetchSpy.mock.calls[0]![0])).toContain('type=file');
   });
 });
