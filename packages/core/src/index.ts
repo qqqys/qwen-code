@@ -293,6 +293,7 @@ export type {
   CronTaskDelivery,
   DurableCronTask,
   CronTaskRun,
+  CronRunSessionOutcome,
 } from './services/cronTasksFile.js';
 export {
   readCronTasks,
@@ -301,6 +302,7 @@ export {
   getCronFilePath,
   generateCronTaskId,
   appendCronRun,
+  annotateCronRunSession,
   taskHasLegacyCondition,
   MAX_TASK_RUNS,
   MAX_CHANNEL_DELIVERY_NAME_LENGTH,
