@@ -1479,6 +1479,8 @@ describe('BridgeClient — create-sub-session extMethod dispatch', () => {
           completion: 'sent' | 'first-turn';
           model?: string;
           name?: string;
+          sourceType?: string;
+          sourceId?: string;
           callerSessionId?: string;
         }) => Promise<{
           sessionId: string;
@@ -1519,6 +1521,8 @@ describe('BridgeClient — create-sub-session extMethod dispatch', () => {
       completion: 'first-turn',
       model: 'm1',
       name: 'digest',
+      sourceType: 'default',
+      sourceId: 'scheduled_task_run:task-1',
       callerSessionId: 'caller-1',
     });
 
@@ -1527,6 +1531,8 @@ describe('BridgeClient — create-sub-session extMethod dispatch', () => {
       completion: 'first-turn',
       model: 'm1',
       name: 'digest',
+      sourceType: 'default',
+      sourceId: 'scheduled_task_run:task-1',
       callerSessionId: 'caller-1',
     });
     expect(res).toEqual({
@@ -1572,6 +1578,20 @@ describe('BridgeClient — create-sub-session extMethod dispatch', () => {
     await expect(
       client.extMethod(METHOD, { prompt: 'x', completion: 'weird' }),
     ).rejects.toThrow();
+    expect(onCreate).not.toHaveBeenCalled();
+  });
+
+  it('rejects malformed creator attribution', async () => {
+    const onCreate = vi.fn(async () => ({ sessionId: 'sub-source' }));
+    const client = makeClientWithCreateSubSession(onCreate);
+    await expect(
+      client.extMethod(METHOD, {
+        prompt: 'x',
+        completion: 'sent',
+        sourceId: 'task-1',
+        callerSessionId: 'caller-1',
+      }),
+    ).rejects.toThrow(/sourceType/);
     expect(onCreate).not.toHaveBeenCalled();
   });
 
@@ -1646,6 +1666,15 @@ describe('BridgeClient — create-sub-session extMethod dispatch', () => {
       callerSessionId: 'caller-1',
     });
     expect(onCreate).toHaveBeenCalledTimes(1);
+
+    await client.extMethod(METHOD, {
+      prompt: 'x'.repeat(MAX_SUB_SESSION_PROMPT_CHARS + 512),
+      completion: 'sent',
+      sourceType: 'default',
+      sourceId: 'scheduled_task_run:task-1',
+      callerSessionId: 'caller-1',
+    });
+    expect(onCreate).toHaveBeenCalledTimes(2);
   });
 });
 
