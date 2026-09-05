@@ -36,8 +36,14 @@ vi.mock('../../utils/stdioHelpers.js', () => ({
   writeStderrLine: (line: string) => stderr.push(line),
 }));
 
-const { handleAdd, handleControllerList, handleRemove, ID_COL, LABEL_COL } =
-  await import('./controllers.js');
+const {
+  controllersCommand,
+  handleAdd,
+  handleControllerList,
+  handleRemove,
+  ID_COL,
+  LABEL_COL,
+} = await import('./controllers.js');
 
 const TOKEN = `qpc_${'a'.repeat(64)}`;
 
@@ -93,8 +99,21 @@ describe('controllers add', () => {
     addPeerController.mockResolvedValue({ record: record(), token: TOKEN });
     await handleAdd({ label: 'voice bridge' });
     const out = stdout.join('\n');
+    expect(out).toContain('agents.crossSessionMessaging enabled');
+    expect(out).toContain('restarted after enabling it');
     expect(out).toContain('without per-message review');
     expect(out).toContain('agents.crossSessionInbound');
+  });
+
+  it('sanitizes a label before printing it', async () => {
+    addPeerController.mockResolvedValue({
+      record: record({ label: '\u001b[2Kvoice\nbridge' }),
+      token: TOKEN,
+    });
+    await handleAdd({ label: 'voice bridge' });
+    expect(stdout.join('\n')).not.toContain('\u001b');
+    expect(stdout.join('\n')).not.toContain('voice\nbridge');
+    expect(exitCode).toBeUndefined();
   });
 
   it('emits one JSON object with --json', async () => {
@@ -175,14 +194,50 @@ describe('controllers list', () => {
     expect(stdout.join('\n')).toContain('voice');
   });
 
-  it('emits JSON Lines without the hash', async () => {
-    listPeerControllers.mockResolvedValue([record()]);
+  it('shows the full label at the supported length limit', async () => {
+    const shared = 'x'.repeat(39);
+    listPeerControllers.mockResolvedValue([
+      record({ label: `${shared}a` }),
+      record({ id: 'c_89abcdef', label: `${shared}b` }),
+    ]);
+    await handleControllerList({});
+    expect(stdout.join('\n')).toContain(`${shared}a`);
+    expect(stdout.join('\n')).toContain(`${shared}b`);
+  });
+
+  it('emits one JSON line per controller without hashes', async () => {
+    listPeerControllers.mockResolvedValue([
+      record(),
+      record({ id: 'c_89abcdef', label: 'dictation' }),
+    ]);
     await handleControllerList({ json: true });
+    expect(stdout).toHaveLength(2);
     expect(JSON.parse(stdout[0])).toEqual({
       id: 'c_0123abcd',
       label: 'voice bridge',
       createdAt: record().createdAt,
     });
+    expect(JSON.parse(stdout[1])).toMatchObject({
+      id: 'c_89abcdef',
+      label: 'dictation',
+    });
+    expect(stdout.join('\n')).not.toContain('tokenHash');
+    expect(exitCode).toBeUndefined();
+  });
+
+  it('emits no JSON lines for an empty list', async () => {
+    listPeerControllers.mockResolvedValue([]);
+    await handleControllerList({ json: true });
+    expect(stdout).toEqual([]);
+    expect(exitCode).toBeUndefined();
+  });
+
+  it('renders an out-of-range creation time as unknown', async () => {
+    listPeerControllers.mockResolvedValue([
+      record({ createdAt: Number.MAX_VALUE }),
+    ]);
+    await handleControllerList({});
+    expect(stdout.join('\n')).toContain('unknown');
   });
 
   it('reports an unreadable registry and exits nonzero', async () => {
@@ -226,5 +281,52 @@ describe('controllers remove', () => {
     await handleRemove({ id: 'c_0123abcd' });
     expect(stderr.join('\n')).toContain('EROFS');
     expect(exitCode).toBe(1);
+  });
+
+  it('sanitizes a label before confirming revocation', async () => {
+    removePeerController.mockResolvedValue(
+      record({ label: '\u001b[2Kvoice\nbridge' }),
+    );
+    await handleRemove({ id: 'c_0123abcd' });
+    expect(stdout.join('\n')).not.toContain('\u001b');
+    expect(stdout.join('\n')).not.toContain('voice\nbridge');
+    expect(exitCode).toBeUndefined();
+  });
+});
+
+describe('controllers command wiring', () => {
+  it('registers every subcommand and requires an add label', () => {
+    const add = { option: vi.fn().mockReturnThis() };
+    const root = {
+      command: vi.fn(
+        (definition: {
+          command: string;
+          builder?: (args: typeof add) => unknown;
+        }) => {
+          if (definition.command === 'add') definition.builder?.(add);
+          return root;
+        },
+      ),
+      demandCommand: vi.fn().mockReturnThis(),
+      version: vi.fn().mockReturnThis(),
+    };
+
+    const builder = controllersCommand.builder;
+    if (typeof builder !== 'function') throw new Error('builder is required');
+    builder(root as never);
+
+    expect(root.command.mock.calls.map(([entry]) => entry.command)).toEqual([
+      'add',
+      'list',
+      'remove <id>',
+    ]);
+    expect(add.option).toHaveBeenCalledWith(
+      'label',
+      expect.objectContaining({ demandOption: true, type: 'string' }),
+    );
+    expect(root.demandCommand).toHaveBeenCalledWith(
+      1,
+      'You need at least one command before continuing.',
+    );
   });
 });

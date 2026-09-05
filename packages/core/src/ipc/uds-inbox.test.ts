@@ -1040,9 +1040,10 @@ describe.skipIf(isWindows)('controller grants', () => {
   });
 
   it('holds the grant for every frame on the connection', async () => {
-    const started = await listenWithController((presented) =>
+    const resolver = vi.fn((presented: string) =>
       presented === GRANT ? IDENTITY : undefined,
     );
+    const started = await listenWithController(resolver);
     await writeRaw(started.socketPath, [
       buildAuthLine(GRANT) +
         encodePeerFrame(buildUserFrame({ content: 'one' })) +
@@ -1052,6 +1053,8 @@ describe.skipIf(isWindows)('controller grants', () => {
     expect(received).toHaveLength(2);
     expect(admitted).toEqual(['controller', 'controller']);
     expect(controllers).toEqual([IDENTITY, IDENTITY]);
+    expect(resolver).toHaveBeenCalledOnce();
+    expect(resolver).toHaveBeenCalledWith(GRANT);
   });
 
   it('drops a connection whose token no grant resolves', async () => {

@@ -22,6 +22,13 @@ vi.mock('./sessions/ps.js', () => ({
   },
 }));
 
+vi.mock('./sessions/controllers.js', () => ({
+  controllersCommand: {
+    command: 'controllers',
+    describe: 'Manage trusted controller tokens',
+  },
+}));
+
 import { sessionsCommand } from './sessions.js';
 import { type Argv } from 'yargs';
 import yargs from 'yargs';

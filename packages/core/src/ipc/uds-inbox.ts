@@ -26,8 +26,8 @@
  * frame's claimed `from` is still unauthenticated and kept only for reply
  * routing — any process holding a token can write any `from` it likes.
  * Everything downstream is built on that assumption: the inbound gate
- * decides whether a message may act, and the envelope tells the model the
- * content is not from its user.
+ * decides whether a message may act, and the envelope identifies the
+ * transport-authenticated origin and its exact authority.
  */
 
 import { randomBytes, timingSafeEqual } from 'node:crypto';

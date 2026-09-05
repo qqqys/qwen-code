@@ -1681,6 +1681,36 @@ describe.skipIf(isWindows)('controller grants', () => {
     expect(submitted[0].modelText).toContain('origin="controller"');
   });
 
+  it('keeps controller attribution while waiting for the UI submitter', async () => {
+    const { token } = await grant('voice bridge');
+    const started = await PeerMessaging.start({
+      socketPath: path.join(tmpDir, 'socks', 'self.sock'),
+      getApprovalMode: () => ApprovalMode.DEFAULT,
+      getPolicySetting: () => undefined,
+      updateSessionRegistryIpcPath: async () => {},
+      ipcToken: TEST_TOKEN,
+      childToken: TEST_CHILD_TOKEN,
+      controllerRegistryPath: registryPath,
+    });
+    if (!started) throw new Error('peer messaging failed to start');
+    messaging = started;
+
+    await send(started.socketPath!, buildUserFrame({ content: 'buffered' }), {
+      authToken: token,
+    });
+    await settle();
+
+    const submitted: string[] = [];
+    started.setSubmitFn((modelText) => {
+      submitted.push(modelText);
+      return true;
+    });
+    expect(submitted).toHaveLength(1);
+    expect(submitted[0]).toContain(
+      'origin="controller" controller="voice bridge"',
+    );
+  });
+
   it('parks a controller message under an explicit hold and releases it as itself', async () => {
     const { token } = await grant('voice bridge');
     const { messaging: m, submitted } = await start(ApprovalMode.DEFAULT, {

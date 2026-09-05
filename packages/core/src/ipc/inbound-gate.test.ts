@@ -51,7 +51,8 @@ function harness(
     scope?: PolicyScope;
   } = {},
 ): Harness {
-  let mode: ApprovalMode | null = initial.mode ?? ApprovalMode.DEFAULT;
+  let mode: ApprovalMode | null =
+    initial.mode === undefined ? ApprovalMode.DEFAULT : initial.mode;
   let policy: unknown = initial.policy;
   let heldExpiryMs: number | null =
     initial.heldExpiryMs === undefined
@@ -1125,7 +1126,11 @@ describe('controller grants', () => {
   });
 
   it('accepts into either review class', () => {
-    for (const mode of [ApprovalMode.DEFAULT, ApprovalMode.YOLO]) {
+    for (const mode of [
+      ApprovalMode.DEFAULT,
+      ApprovalMode.AUTO,
+      ApprovalMode.YOLO,
+    ]) {
       const h = harness({ mode });
       expect(h.gate.admit(frame(), viaController)).toBe('accept');
     }
@@ -1156,6 +1161,16 @@ describe('controller grants', () => {
     expect(h.statuses).toEqual([{ msgId: f.msgId, status: 'refused' }]);
   });
 
+  it('fails closed when the configured policy is invalid', () => {
+    const h = harness();
+    h.setRawPolicy('invalid');
+    expect(h.gate.admit(frame(), viaController)).toBe('held');
+    expect(h.gate.getHeld()[0]).toMatchObject({
+      cause: 'policy-unreadable',
+      controller: VOICE,
+    });
+  });
+
   it('keeps its origin through a manual approval', () => {
     // Releasing a parked message has to rebuild the envelope it would
     // have had on arrival, controller attribution included.
@@ -1175,6 +1190,18 @@ describe('controller grants', () => {
     expect(h.gate.reevaluate('setting cleared')).toBe(1);
     expect(h.delivered).toEqual([f]);
     expect(h.deliveredControllers).toEqual([VOICE]);
+  });
+
+  it('keeps its origin when re-evaluation changes only the hold cause', () => {
+    const h = harness({ mode: ApprovalMode.DEFAULT, policy: 'hold' });
+    const f = frame();
+    h.gate.admit(f, viaController);
+    h.throwOnPolicy();
+    expect(h.gate.reevaluate('policy became unreadable')).toBe(0);
+    expect(h.gate.getHeld()[0]).toMatchObject({
+      cause: 'policy-unreadable',
+      controller: VOICE,
+    });
   });
 
   it('is decided by the transport, never by the frame', () => {
@@ -1444,9 +1471,7 @@ describe('held message expiry', () => {
     // Park both under an unknown mode, then resolve it to one that
     // releases exactly one of them: `bypass` is accepted by an auto-edit
     // receiver, `prompting` is still held on the mode mismatch.
-    // `harness({ mode: null })` would coalesce back to DEFAULT.
-    const h = harness({ heldExpiryMs: 60_000 });
-    h.setMode(null);
+    const h = harness({ mode: null, heldExpiryMs: 60_000 });
     const older = frame({ fromMode: 'bypass' });
     expect(h.gate.admit(older)).toBe('held');
     vi.advanceTimersByTime(10_000);

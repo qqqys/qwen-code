@@ -29,7 +29,12 @@ const inboxFailure = vi.hoisted(() => ({
  * file checks is what `/peers` renders and revokes.
  */
 const controllers = vi.hoisted(() => ({
-  records: [] as Array<{ id: string; label: string; createdAt: number }>,
+  records: [] as Array<{
+    id: string;
+    label: string;
+    createdAt: number;
+    tokenHash?: string;
+  }>,
   listThrows: null as string | null,
   removeThrows: null as string | null,
 }));
@@ -863,13 +868,37 @@ describe('/peers controllers', () => {
   it('lists the grants with their ids', async () => {
     controllers.records = [
       { id: 'c_0123abcd', label: 'voice bridge', createdAt: 1_700_000_000_000 },
-      { id: 'c_89abcdef', label: 'dictation', createdAt: 1_700_000_000_000 },
+      {
+        id: 'c_89abcdef',
+        label: 'dictation',
+        createdAt: 1_700_000_000_000,
+        tokenHash: 'f'.repeat(64),
+      },
     ];
     const out = await run(fake, 'controllers');
     expect(out.content).toContain('2 trusted controllers');
     expect(out.content).toContain('c_0123abcd  voice bridge');
     expect(out.content).toContain('c_89abcdef  dictation');
     expect(out.content).toContain('/peers revoke <id>');
+    expect(out.content).toContain('unless crossSessionInbound');
+    expect(out.content).not.toContain('f'.repeat(64));
+  });
+
+  it('renders an out-of-range date as unknown', async () => {
+    controllers.records = [
+      { id: 'c_0123abcd', label: 'voice', createdAt: Number.MAX_VALUE },
+    ];
+    const out = await run(fake, 'controllers');
+    expect(out.content).toContain('added unknown');
+  });
+
+  it('works even when cross-session messaging is off', async () => {
+    controllers.records = [
+      { id: 'c_0123abcd', label: 'voice', createdAt: 1_700_000_000_000 },
+    ];
+    const out = await run(null, 'controllers', false);
+    expect(out.content).toContain('c_0123abcd');
+    expect(out.content).not.toContain('Cross-session messaging is off');
   });
 
   it('reports a registry it cannot read as a line, not a crash', async () => {
@@ -892,6 +921,12 @@ describe('/peers revoke', () => {
     expect(out.messageType).toBe('info');
     expect(out.content).toContain('Revoked the controller "voice bridge"');
     expect(out.content).toContain('next connection');
+    expect(controllers.records).toHaveLength(0);
+  });
+
+  it('works even when this session has no peer inbox', async () => {
+    const out = await run(null, 'revoke c_0123abcd', false);
+    expect(out.content).toContain('Revoked the controller');
     expect(controllers.records).toHaveLength(0);
   });
 

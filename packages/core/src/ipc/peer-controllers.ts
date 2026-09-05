@@ -57,6 +57,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import * as fsSync from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import lockfile from 'proper-lockfile';
 import { Storage } from '../config/storage.js';
 import { atomicWriteJSON } from '../utils/atomicFileWrite.js';
 import { createDebugLogger } from '../utils/debugLogger.js';
@@ -106,6 +107,24 @@ export const MAX_CONTROLLERS = 32;
 const MAX_REGISTRY_BYTES = 64 * 1024;
 
 const REGISTRY_FILE_MODE = 0o600;
+const REGISTRY_DIRECTORY_MODE = 0o700;
+
+const LOCK_OPTIONS: lockfile.LockOptions = {
+  realpath: false,
+  stale: 5000,
+  retries: {
+    retries: 10,
+    minTimeout: 5,
+    maxTimeout: 100,
+    factor: 2,
+    randomize: true,
+  },
+  onCompromised: (error) => {
+    debugLogger.debug(
+      `controller registry lock compromised: ${describe(error)}`,
+    );
+  },
+};
 
 const CONTROLLER_ID_RE = /^c_[0-9a-f]{8}$/;
 const TOKEN_HASH_RE = /^[0-9a-f]{64}$/;
@@ -142,6 +161,7 @@ export type PeerControllerErrorCode =
   | 'invalid-label'
   | 'duplicate-label'
   | 'too-many'
+  | 'invalid-registry'
   | 'unsafe-path';
 
 export class PeerControllerError extends Error {
@@ -154,9 +174,15 @@ export class PeerControllerError extends Error {
   }
 }
 
+let defaultRegistryPath: string | undefined;
+
 /** Where grants live: one file per Qwen home, beside the session registry. */
 export function getPeerControllerRegistryPath(): string {
-  return path.join(Storage.getGlobalQwenDir(), 'peer-controllers.json');
+  defaultRegistryPath ??= path.resolve(
+    Storage.getGlobalQwenDir(),
+    'peer-controllers.json',
+  );
+  return defaultRegistryPath;
 }
 
 export function hashControllerToken(token: string): string {
@@ -378,7 +404,6 @@ async function writeRegistry(
   registry: PeerControllerRegistry,
 ): Promise<void> {
   await assertWritablePath(filePath);
-  await fs.mkdir(path.dirname(filePath), { recursive: true });
   await atomicWriteJSON(filePath, registry, {
     mode: REGISTRY_FILE_MODE,
     // The file holds credentials-in-effect: an over-permissive copy
@@ -388,11 +413,99 @@ async function writeRegistry(
   });
 }
 
+function invalidRegistry(
+  filePath: string,
+  reason: string,
+): PeerControllerError {
+  return new PeerControllerError(
+    `Refusing to modify ${filePath}: ${reason}. Move it aside or repair it first.`,
+    'invalid-registry',
+  );
+}
+
+function readPeerControllerRegistryStrictSync(
+  filePath: string,
+): PeerControllerRegistry {
+  let raw: string;
+  try {
+    const stats = fsSync.lstatSync(filePath);
+    if (!stats.isFile()) {
+      if (stats.isSymbolicLink()) {
+        throw new PeerControllerError(
+          `${filePath} is not a regular file; move it aside first.`,
+          'unsafe-path',
+        );
+      }
+      throw invalidRegistry(filePath, 'it is not a regular file');
+    }
+    if (stats.size > MAX_REGISTRY_BYTES) {
+      throw invalidRegistry(
+        filePath,
+        `it exceeds the ${MAX_REGISTRY_BYTES}-byte limit`,
+      );
+    }
+    raw = fsSync.readFileSync(filePath, 'utf8');
+  } catch (error) {
+    if (isNodeError(error) && error.code === 'ENOENT') return emptyRegistry();
+    throw error;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw invalidRegistry(filePath, 'it is not valid JSON');
+  }
+  if (
+    !isRecord(parsed) ||
+    parsed['schemaVersion'] !== PEER_CONTROLLER_SCHEMA_VERSION ||
+    !Array.isArray(parsed['controllers'])
+  ) {
+    throw invalidRegistry(filePath, 'it has an unsupported shape or version');
+  }
+
+  const controllers: PeerControllerRecord[] = [];
+  for (const entry of parsed['controllers']) {
+    const record = toValidRecord(entry);
+    if (record === null) {
+      throw invalidRegistry(filePath, 'it contains a malformed controller');
+    }
+    controllers.push(record);
+  }
+  return { schemaVersion: PEER_CONTROLLER_SCHEMA_VERSION, controllers };
+}
+
+async function withRegistryLock<T>(
+  filePath: string,
+  mutate: () => Promise<T>,
+): Promise<T> {
+  const directory = path.dirname(filePath);
+  await fs.mkdir(directory, {
+    recursive: true,
+    mode: REGISTRY_DIRECTORY_MODE,
+  });
+  const lockPath = path.join(
+    await fs.realpath(directory),
+    path.basename(filePath),
+  );
+  const release = await lockfile.lock(lockPath, LOCK_OPTIONS);
+  try {
+    return await mutate();
+  } finally {
+    try {
+      await release();
+    } catch {
+      // A completed registry mutation must not be reported as failed merely
+      // because a stale-lock takeover already removed the lock.
+    }
+  }
+}
+
 /** Every grant this Qwen home holds, newest last. */
 export async function listPeerControllers(
   filePath: string = getPeerControllerRegistryPath(),
 ): Promise<PeerControllerRecord[]> {
-  return readPeerControllerRegistrySync(filePath).controllers;
+  return readPeerControllerRegistryStrictSync(filePath).controllers;
 }
 
 /**
@@ -419,41 +532,43 @@ export async function addPeerController(
     );
   }
 
-  const registry = readPeerControllerRegistrySync(filePath);
-  if (
-    registry.controllers.some(
-      (record) => record.label.toLowerCase() === flattened.toLowerCase(),
-    )
-  ) {
-    throw new PeerControllerError(
-      `A controller called "${flattened}" already exists. Labels are how you tell them apart when revoking, so pick another.`,
-      'duplicate-label',
-    );
-  }
-  if (registry.controllers.length >= MAX_CONTROLLERS) {
-    throw new PeerControllerError(
-      `This Qwen home already holds ${MAX_CONTROLLERS} controllers. Revoke one before adding another.`,
-      'too-many',
-    );
-  }
+  return withRegistryLock(filePath, async () => {
+    const registry = readPeerControllerRegistryStrictSync(filePath);
+    if (
+      registry.controllers.some(
+        (record) => record.label.toLowerCase() === flattened.toLowerCase(),
+      )
+    ) {
+      throw new PeerControllerError(
+        `A controller called "${flattened}" already exists. Labels are how you tell them apart when revoking, so pick another.`,
+        'duplicate-label',
+      );
+    }
+    if (registry.controllers.length >= MAX_CONTROLLERS) {
+      throw new PeerControllerError(
+        `This Qwen home already holds ${MAX_CONTROLLERS} controllers. Revoke one before adding another.`,
+        'too-many',
+      );
+    }
 
-  const token = mintControllerToken();
-  const taken = new Set(registry.controllers.map((record) => record.id));
-  let id = `c_${randomBytes(4).toString('hex')}`;
-  while (taken.has(id)) {
-    id = `c_${randomBytes(4).toString('hex')}`;
-  }
-  const record: PeerControllerRecord = {
-    id,
-    label: flattened,
-    tokenHash: hashControllerToken(token),
-    createdAt: Date.now(),
-  };
-  await writeRegistry(filePath, {
-    schemaVersion: PEER_CONTROLLER_SCHEMA_VERSION,
-    controllers: [...registry.controllers, record],
+    const token = mintControllerToken();
+    const taken = new Set(registry.controllers.map((record) => record.id));
+    let id = `c_${randomBytes(4).toString('hex')}`;
+    while (taken.has(id)) {
+      id = `c_${randomBytes(4).toString('hex')}`;
+    }
+    const record: PeerControllerRecord = {
+      id,
+      label: flattened,
+      tokenHash: hashControllerToken(token),
+      createdAt: Date.now(),
+    };
+    await writeRegistry(filePath, {
+      schemaVersion: PEER_CONTROLLER_SCHEMA_VERSION,
+      controllers: [...registry.controllers, record],
+    });
+    return { record, token };
   });
-  return { record, token };
 }
 
 /**
@@ -469,17 +584,19 @@ export async function removePeerController(
   id: string,
   filePath: string = getPeerControllerRegistryPath(),
 ): Promise<PeerControllerRecord | null> {
-  const registry = readPeerControllerRegistrySync(filePath);
-  const needle = id.trim().toLowerCase();
-  const removed = registry.controllers.find(
-    (record) => record.id.toLowerCase() === needle,
-  );
-  if (!removed) return null;
-  await writeRegistry(filePath, {
-    schemaVersion: PEER_CONTROLLER_SCHEMA_VERSION,
-    controllers: registry.controllers.filter(
-      (record) => record.id.toLowerCase() !== needle,
-    ),
+  return withRegistryLock(filePath, async () => {
+    const registry = readPeerControllerRegistryStrictSync(filePath);
+    const needle = id.trim().toLowerCase();
+    const removed = registry.controllers.find(
+      (record) => record.id.toLowerCase() === needle,
+    );
+    if (!removed) return null;
+    await writeRegistry(filePath, {
+      schemaVersion: PEER_CONTROLLER_SCHEMA_VERSION,
+      controllers: registry.controllers.filter(
+        (record) => record.id.toLowerCase() !== needle,
+      ),
+    });
+    return removed;
   });
-  return removed;
 }

@@ -609,10 +609,10 @@ export class PeerMessaging {
     // than conversing with it.
     const from =
       frame.from ??
-      (origin.selfSent
-        ? 'own process'
-        : origin.controller
-          ? 'controller'
+      (origin.controller
+        ? 'controller'
+        : origin.selfSent
+          ? 'own process'
           : 'unknown session');
     const attribution = {
       selfSent: origin.selfSent,

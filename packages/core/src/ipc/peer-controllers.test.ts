@@ -12,6 +12,7 @@ import {
   addPeerController,
   CONTROLLER_TOKEN_PREFIX,
   hashControllerToken,
+  getPeerControllerRegistryPath,
   listPeerControllers,
   matchControllerToken,
   MAX_CONTROLLER_LABEL_CHARS,
@@ -88,7 +89,15 @@ describe('addPeerController', () => {
     // reason the file holds a hash rather than the credential.
     const raw = await fs.readFile(registryPath, 'utf8');
     expect(raw).not.toContain(token);
+    expect(raw).not.toContain(token.slice(CONTROLLER_TOKEN_PREFIX.length));
     expect(raw).toContain(record.tokenHash);
+  });
+
+  it.skipIf(isWindows)('creates a private registry directory', async () => {
+    const nestedRegistry = path.join(tmpDir, 'qwen-home', 'controllers.json');
+    await addPeerController('voice', nestedRegistry);
+    const stats = await fs.stat(path.dirname(nestedRegistry));
+    expect(stats.mode & 0o777).toBe(0o700);
   });
 
   it.skipIf(isWindows)('writes the file 0600', async () => {
@@ -123,6 +132,27 @@ describe('addPeerController', () => {
       'two',
     ]);
     expect(first.record.id).not.toBe(second.record.id);
+  });
+
+  it('serializes concurrent additions', async () => {
+    await Promise.all(
+      ['one', 'two', 'three', 'four'].map((label) =>
+        addPeerController(label, registryPath),
+      ),
+    );
+    expect(
+      (await listPeerControllers(registryPath))
+        .map((record) => record.label)
+        .sort(),
+    ).toEqual(['four', 'one', 'three', 'two']);
+  });
+
+  it('refuses to overwrite a malformed registry', async () => {
+    await writeRaw('{ not json');
+    await expect(
+      addPeerController('voice', registryPath),
+    ).rejects.toMatchObject({ code: 'invalid-registry' });
+    expect(await fs.readFile(registryPath, 'utf8')).toBe('{ not json');
   });
 
   it('flattens a label before storing it', async () => {
@@ -226,6 +256,16 @@ describe('removePeerController', () => {
       code: 'ENOENT',
     });
   });
+
+  it('serializes concurrent revocations without resurrecting a grant', async () => {
+    const first = await addPeerController('one', registryPath);
+    const second = await addPeerController('two', registryPath);
+    await Promise.all([
+      removePeerController(first.record.id, registryPath),
+      removePeerController(second.record.id, registryPath),
+    ]);
+    expect(await listPeerControllers(registryPath)).toEqual([]);
+  });
 });
 
 describe('readPeerControllerRegistrySync', () => {
@@ -248,6 +288,9 @@ describe('readPeerControllerRegistrySync', () => {
     expect(readPeerControllerRegistrySync(registryPath).controllers).toEqual(
       [],
     );
+    await expect(listPeerControllers(registryPath)).rejects.toMatchObject({
+      code: 'invalid-registry',
+    });
   });
 
   it('treats a schema it does not know as no grants', async () => {
@@ -337,6 +380,17 @@ describe('matchControllerToken', () => {
     ).toBeUndefined();
   });
 
+  it('matches a grant after the first registry entry', async () => {
+    await addPeerController('first', registryPath);
+    const second = await addPeerController('second', registryPath);
+    expect(
+      matchControllerToken(
+        readPeerControllerRegistrySync(registryPath),
+        second.token,
+      ),
+    ).toEqual({ id: second.record.id, label: 'second' });
+  });
+
   it('rejects a token without the prefix', async () => {
     const { token } = await addPeerController('voice', registryPath);
     const registry = readPeerControllerRegistrySync(registryPath);
@@ -349,14 +403,22 @@ describe('matchControllerToken', () => {
   });
 
   it('rejects an oversized presentation without hashing it', async () => {
-    await addPeerController('voice', registryPath);
+    const presented = CONTROLLER_TOKEN_PREFIX + 'x'.repeat(4096);
+    await writeRaw(
+      JSON.stringify({
+        schemaVersion: PEER_CONTROLLER_SCHEMA_VERSION,
+        controllers: [
+          {
+            id: 'c_0123abcd',
+            label: 'voice',
+            tokenHash: hashControllerToken(presented),
+            createdAt: Date.now(),
+          },
+        ],
+      }),
+    );
     const registry = readPeerControllerRegistrySync(registryPath);
-    expect(
-      matchControllerToken(
-        registry,
-        CONTROLLER_TOKEN_PREFIX + 'x'.repeat(1024 * 1024),
-      ),
-    ).toBeUndefined();
+    expect(matchControllerToken(registry, presented)).toBeUndefined();
   });
 
   it('matches nothing against an empty registry', () => {
@@ -387,5 +449,28 @@ describe('resolveControllerToken', () => {
     expect(
       resolveControllerToken('a'.repeat(64), path.join(tmpDir, 'absent.json')),
     ).toBeUndefined();
+  });
+});
+
+describe('getPeerControllerRegistryPath', () => {
+  it('pins a relative QWEN_HOME before the working directory changes', () => {
+    const originalCwd = process.cwd();
+    const originalHome = process.env['QWEN_HOME'];
+    try {
+      process.env['QWEN_HOME'] = 'relative-qwen-home';
+      process.chdir(tmpDir);
+      const expected = path.resolve(
+        'relative-qwen-home',
+        'peer-controllers.json',
+      );
+      const first = getPeerControllerRegistryPath();
+      process.chdir(path.dirname(tmpDir));
+      expect(getPeerControllerRegistryPath()).toBe(first);
+      expect(first).toBe(expected);
+    } finally {
+      process.chdir(originalCwd);
+      if (originalHome === undefined) delete process.env['QWEN_HOME'];
+      else process.env['QWEN_HOME'] = originalHome;
+    }
   });
 });

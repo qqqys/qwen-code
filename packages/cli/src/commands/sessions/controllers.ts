@@ -33,7 +33,7 @@ import { writeStderrLine, writeStdoutLine } from '../../utils/stdioHelpers.js';
 
 /** Fixed column widths for the human-readable table (exported for tests). */
 export const ID_COL = 12;
-export const LABEL_COL = 24;
+export const LABEL_COL = 42;
 
 /**
  * Sanitize a field for terminal output.
@@ -112,6 +112,9 @@ async function handleAdd(argv: AddArgs): Promise<void> {
     'The controller presents it on the first line of every connection to a session inbox:',
   );
   writeStdoutLine(`  {"msgV":1,"type":"auth","token":"${token}"}`);
+  writeStdoutLine(
+    'The target session must have agents.crossSessionMessaging enabled and be restarted after enabling it.',
+  );
   writeStdoutLine(
     'Messages it sends are delivered without per-message review, unless agents.crossSessionInbound is "hold" or "refuse".',
   );

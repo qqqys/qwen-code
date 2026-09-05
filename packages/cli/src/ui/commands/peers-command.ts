@@ -198,27 +198,31 @@ export function formatControllerList(
   }
   if (controllers.length === 0) {
     return (
-      'No trusted controllers. Messages from a program that is not a Qwen Code session are held for your review.\n' +
+      'No trusted controllers. Without an explicit "accept" setting, messages from a program that is not a Qwen Code session are held for your review.\n' +
       'Add one with: qwen sessions controllers add --label <name>'
     );
   }
   const lines = controllers.map(
     (record) =>
-      `  ${record.id}  ${flattenPeerLabel(record.label)}  added ${new Date(
+      `  ${record.id}  ${flattenPeerLabel(record.label)}  added ${formatCreated(
         record.createdAt,
-      )
-        .toISOString()
-        .replace('T', ' ')
-        .slice(0, 16)}`,
+      )}`,
   );
   return [
     `${controllers.length} trusted controller${
       controllers.length === 1 ? '' : 's'
-    }. Messages presenting one of these tokens are delivered without per-message review:`,
+    }. Messages presenting one of these tokens are delivered without per-message review unless crossSessionInbound is "hold" or "refuse":`,
     ...lines,
     '',
     'Revoke with /peers revoke <id>.',
   ].join('\n');
+}
+
+function formatCreated(createdAt: number): string {
+  const date = new Date(createdAt);
+  return Number.isNaN(date.getTime())
+    ? 'unknown'
+    : date.toISOString().replace('T', ' ').slice(0, 16);
 }
 
 export const peersCommand: SlashCommand = {
@@ -230,35 +234,10 @@ export const peersCommand: SlashCommand = {
     );
   },
   action: async (context, args): Promise<SlashCommandActionReturn> => {
-    const peerMessaging = context.services.peerMessaging;
-    if (!peerMessaging) {
-      // Absent for two different reasons, and telling a user to enable a
-      // setting they already enabled sends them nowhere: the inbox is also
-      // absent when the session failed to register or the socket failed to
-      // bind (path too long, unwritable runtime dir).
-      const enabled =
-        context.services.settings?.merged?.agents?.crossSessionMessaging ===
-        true;
-      const failure = enabled ? getLastPeerInboxFailure() : null;
-      return {
-        type: 'message',
-        messageType: enabled ? 'error' : 'info',
-        content: !enabled
-          ? 'Cross-session messaging is off. Enable it with "agents.crossSessionMessaging": true in settings.json, then restart.'
-          : failure
-            ? `Cross-session messaging is on, but this session has no inbox — it failed to bind its socket: ${describePeerInboxFailure(failure)}`
-            : 'Cross-session messaging is on, but this session has no inbox: it failed to register in the session registry, or the inbox is still starting. Re-run with DEBUG=1 to see the registration error.',
-      };
-    }
-
-    const held = peerMessaging.getHeld();
     const [verb, ...rest] = args.trim().split(/\s+/).filter(Boolean);
 
-    // Controller grants are not held messages: they live in a file, they
-    // outlive every session, and they are the answer to "why did that
-    // arrive unreviewed". They are here anyway because that question is
-    // asked from this screen, and sending the user to a separate CLI
-    // command to answer it would be the wrong trade.
+    // Controller grants live in the Qwen home, independently of whether
+    // this session managed to start a peer inbox.
     if (verb === 'controllers') {
       return {
         type: 'message',
@@ -304,6 +283,29 @@ export const peersCommand: SlashCommand = {
           'This session and every other one stop accepting its token on the next connection.',
       };
     }
+
+    const peerMessaging = context.services.peerMessaging;
+    if (!peerMessaging) {
+      // Absent for two different reasons, and telling a user to enable a
+      // setting they already enabled sends them nowhere: the inbox is also
+      // absent when the session failed to register or the socket failed to
+      // bind (path too long, unwritable runtime dir).
+      const enabled =
+        context.services.settings?.merged?.agents?.crossSessionMessaging ===
+        true;
+      const failure = enabled ? getLastPeerInboxFailure() : null;
+      return {
+        type: 'message',
+        messageType: enabled ? 'error' : 'info',
+        content: !enabled
+          ? 'Cross-session messaging is off. Enable it with "agents.crossSessionMessaging": true in settings.json, then restart.'
+          : failure
+            ? `Cross-session messaging is on, but this session has no inbox — it failed to bind its socket: ${describePeerInboxFailure(failure)}`
+            : 'Cross-session messaging is on, but this session has no inbox: it failed to register in the session registry, or the inbox is still starting. Re-run with DEBUG=1 to see the registration error.',
+      };
+    }
+
+    const held = peerMessaging.getHeld();
 
     if (verb === undefined || verb === 'list') {
       // Decisions bind to this listing: record exactly which messages

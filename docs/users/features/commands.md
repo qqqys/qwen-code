@@ -711,10 +711,11 @@ These commands are run from the shell as `qwen <subcommand>` before starting an 
 
 ### Session Management
 
-| Command              | Description                                 | Usage Examples                                               |
-| -------------------- | ------------------------------------------- | ------------------------------------------------------------ |
-| `qwen sessions list` | List recent conversation sessions           | `qwen sessions list`, `qwen sessions list --json --limit 50` |
-| `qwen sessions ps`   | List interactive sessions running right now | `qwen sessions ps`, `qwen sessions ps --json`                |
+| Command                     | Description                                 | Usage Examples                                                                   |
+| --------------------------- | ------------------------------------------- | -------------------------------------------------------------------------------- |
+| `qwen sessions list`        | List recent conversation sessions           | `qwen sessions list`, `qwen sessions list --json --limit 50`                     |
+| `qwen sessions ps`          | List interactive sessions running right now | `qwen sessions ps`, `qwen sessions ps --json`                                    |
+| `qwen sessions controllers` | Manage trusted controller tokens            | `qwen sessions controllers add --label <name>`, `qwen sessions controllers list` |
 
 #### `qwen sessions list`
 
@@ -780,7 +781,7 @@ object with fields:
 
 ```
 schemaVersion, pid, procStart, pidNs, sessionId, cwd, name, startedAt,
-qwenVersion
+qwenVersion, ipcPath (when peer messaging is available)
 ```
 
 Nothing else is written to stdout — an empty listing prints nothing at
@@ -954,7 +955,7 @@ still yields to an explicit setting: an `agents.crossSessionInbound` of
 belong to your Qwen home rather than to one session, so a controller
 reaches whichever sessions you are running, and sessions re-read the
 file on every connection: minting or revoking one takes effect on the
-next message, with nothing to restart.
+next connection, with nothing to restart.
 
 ```bash
 qwen sessions controllers list          # ids, labels, when they were added
