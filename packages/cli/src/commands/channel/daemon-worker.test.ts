@@ -4067,15 +4067,20 @@ describe('daemonWorkerCommand', () => {
     const exit = mockProcessExitNoThrow();
     const send = vi.fn();
     const restoreSend = stubProcessSend(send as NodeJS.Process['send']);
+    const delayed = new Promise<void>((resolve) => {
+      setTimeout(resolve, 5_000);
+    });
     const never = new Promise<void>(() => undefined);
-    const disconnect = vi.fn().mockResolvedValue(undefined);
+    const disconnect = vi.fn();
+    const waitForDisconnect = vi.fn(() => never);
     mockCreateChannel.mockResolvedValueOnce({
       connect: vi.fn().mockResolvedValue(undefined),
       disconnect,
+      waitForDisconnect,
       name: 'telegram',
       validateWebhookTask: vi.fn(),
-      runWebhookTask: vi.fn(() => never),
-      deliverProactive: vi.fn(() => never),
+      runWebhookTask: vi.fn(() => delayed),
+      deliverProactive: vi.fn(() => delayed),
     });
     vi.stubEnv('QWEN_CHANNEL_DAEMON_WORKER', 'worker-token');
     vi.stubEnv('QWEN_DAEMON_URL', 'http://127.0.0.1:4170');
@@ -4116,10 +4121,14 @@ describe('daemonWorkerCommand', () => {
       );
 
       process.emit('SIGTERM', 'SIGTERM');
-      await vi.advanceTimersByTimeAsync(10_000);
+      await vi.advanceTimersByTimeAsync(7_999);
+      expect(mockBridgeStop).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1);
       await handler;
 
       expect(disconnect).toHaveBeenCalledOnce();
+      expect(waitForDisconnect).toHaveBeenCalledOnce();
       expect(exit).toHaveBeenCalledWith(0);
     } finally {
       restoreSend();

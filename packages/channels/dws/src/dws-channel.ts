@@ -1666,15 +1666,21 @@ export class DwsChannel extends PollingChannelBase<DwsCursor> {
     }
     if (this.shouldFilterImMessage(source, message)) {
       if (source.kind === 'group' || source.kind === 'group-all') {
-        const envelope = this.createImEnvelope(source, message);
-        if (
-          this.groupGate.check(envelope, { createPairingRequest: false })
-            .reason === 'mention_required' &&
-          !this.queuedMessages.has(key) &&
-          !this.cursor.processedMessages.includes(key) &&
-          !this.hasPendingMessage(key)
-        ) {
-          this.recordPendingGroupHistory(envelope);
+        const text = stripMessagePrefix(
+          message.content.trim(),
+          this.dwsMessagePrefix,
+        );
+        if (!this.dwsMessagePrefix || text) {
+          const envelope = this.createImEnvelope(source, message, text);
+          if (
+            this.groupGate.check(envelope, { createPairingRequest: false })
+              .reason === 'mention_required' &&
+            !this.queuedMessages.has(key) &&
+            !this.cursor.processedMessages.includes(key) &&
+            !this.hasPendingMessage(key)
+          ) {
+            this.recordPendingGroupHistory(envelope);
+          }
         }
       }
       this.removePersistedPendingMessageForSource(key, source);
@@ -1776,12 +1782,19 @@ export class DwsChannel extends PollingChannelBase<DwsCursor> {
       this.enqueuePendingConversation(message.conversationId);
     }
     if (!this.hasPendingMessage(key)) {
-      const remembered =
-        source.kind === 'group' || source.kind === 'group-all'
+      const dispatchUnparkedAtCapacity =
+        source.kind === 'at' &&
+        this.connected &&
+        (this.cursor.pendingMessages?.length ?? 0) >= MAX_PROCESSED_ITEMS;
+      const remembered = dispatchUnparkedAtCapacity
+        ? false
+        : source.kind === 'group' || source.kind === 'group-all'
           ? await this.rememberPendingMessageWhenAvailable(source, message)
           : await this.rememberPendingMessage(source, message);
       if (!remembered) {
-        return { completion: Promise.resolve() };
+        if (!dispatchUnparkedAtCapacity) {
+          return { completion: Promise.resolve() };
+        }
       }
     }
     return {
@@ -2139,6 +2152,9 @@ export class DwsChannel extends PollingChannelBase<DwsCursor> {
     try {
       this.saveCursor();
     } catch (error) {
+      if (source.kind === 'group' || source.kind === 'group-all') {
+        return true;
+      }
       this.removePendingMessage(key);
       throw error;
     }
@@ -2383,15 +2399,22 @@ export class DwsChannel extends PollingChannelBase<DwsCursor> {
           pending.source.kind === 'group' ||
           pending.source.kind === 'group-all'
         ) {
-          const envelope = this.createImEnvelope(
-            pending.source,
-            pending.message,
+          const text = stripMessagePrefix(
+            pending.message.content.trim(),
+            this.dwsMessagePrefix,
           );
-          if (
-            this.groupGate.check(envelope, { createPairingRequest: false })
-              .reason === 'mention_required'
-          ) {
-            this.recordPendingGroupHistory(envelope);
+          if (!this.dwsMessagePrefix || text) {
+            const envelope = this.createImEnvelope(
+              pending.source,
+              pending.message,
+              text,
+            );
+            if (
+              this.groupGate.check(envelope, { createPairingRequest: false })
+                .reason === 'mention_required'
+            ) {
+              this.recordPendingGroupHistory(envelope);
+            }
           }
         }
         this.removePersistedPendingMessageForSource(key, pending.source);

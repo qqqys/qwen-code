@@ -61,7 +61,21 @@ export { resolveProxy } from './proxy.js';
 const MAX_CRASH_RESTARTS = 3;
 const CRASH_WINDOW_MS = 5 * 60 * 1000; // 5-minute window for counting crashes
 const RESTART_DELAY_MS = 3000;
+export const CHANNEL_DISCONNECT_DRAIN_MS = 4_000;
 export const BRIDGE_SESSION_RESTORE_TIMEOUT_MS = 60 * 1000;
+
+function disconnectStartedChannels(
+  channels: Iterable<ChannelBase>,
+): Promise<void> {
+  return disconnectChannels(channels, {
+    timeoutMs: CHANNEL_DISCONNECT_DRAIN_MS,
+    onTimeout: () => {
+      writeStderrLine(
+        `[Channel] disconnect drain exceeded ${CHANNEL_DISCONNECT_DRAIN_MS}ms; continuing shutdown.`,
+      );
+    },
+  });
+}
 
 function isFileExistsError(err: unknown): boolean {
   return (
@@ -119,7 +133,7 @@ async function cleanupStartedChannels(
   bridge: AcpBridge,
   router: SessionRouter,
 ): Promise<void> {
-  await disconnectChannels(channels);
+  await disconnectStartedChannels(channels);
   try {
     bridge.stop();
   } catch {
@@ -255,9 +269,18 @@ function createBridgeRecovery(options: BridgeRecoveryOptions): {
         if (isShuttingDown()) return;
 
         const bridge = new AcpBridge(bridgeOpts);
+        try {
+          await bridge.start();
+        } catch (error) {
+          bridge.stop();
+          throw error;
+        }
+        if (isShuttingDown()) {
+          bridge.stop();
+          return;
+        }
         setBridge(bridge);
         attachDisconnectHandler(bridge);
-        await bridge.start();
         router.setBridge(bridge);
         for (const channel of channels.values()) {
           channel.setBridge(bridge);
@@ -268,6 +291,10 @@ function createBridgeRecovery(options: BridgeRecoveryOptions): {
         registerSessionCleanup(bridge, router, channels);
 
         const result = await restoreBridgeSessions(router);
+        if (isShuttingDown()) {
+          bridge.stop();
+          return;
+        }
         writeStdoutLine(
           `[Channel] Bridge restarted. Sessions restored: ${result.restored}, failed: ${result.failed}`,
         );
@@ -408,7 +435,7 @@ async function startSingle(
       ignoreBrokenPipe();
       writeStdoutLineSafe('\n[Channel] Shutting down...');
       scheduler?.stop();
-      await disconnectChannels([channel]);
+      await disconnectStartedChannels([channel]);
       bridge.stop();
       router.clearAll();
       if (serviceInfoWritten) removeServiceInfo();
@@ -569,7 +596,7 @@ async function startAll(
       ignoreBrokenPipe();
       writeStdoutLineSafe('\n[Channel] Shutting down...');
       scheduler?.stop();
-      await disconnectChannels(channels.values());
+      await disconnectStartedChannels(channels.values());
       for (const name of channels.keys()) {
         writeStdoutLineSafe(`[Channel] "${name}" disconnected.`);
       }

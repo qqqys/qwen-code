@@ -124,6 +124,22 @@ export class GroupHistoryStore {
     return entries;
   }
 
+  forget(key: string, messageId: string): void {
+    const loaded = this.loadState();
+    const current = loaded.entries.get(key);
+    if (!current) return;
+    const remaining = current.filter((entry) => entry.messageId !== messageId);
+    if (remaining.length === current.length) return;
+
+    if (remaining.length === 0) {
+      loaded.entries.delete(key);
+      loaded.limits.delete(key);
+    } else {
+      loaded.entries.set(key, remaining);
+    }
+    this.compact(loaded.entries, loaded.limits);
+  }
+
   clear(key: string): void {
     const loaded = this.loadState();
     const state = loaded.entries;

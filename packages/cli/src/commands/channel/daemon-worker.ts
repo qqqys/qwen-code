@@ -114,30 +114,21 @@ const SESSION_PERMISSION_VOTE_FEATURE: ServeFeature = 'session_permission_vote';
 const SESSION_WORKTREE_PERSISTENCE_FEATURE: ServeFeature =
   'session_worktree_persistence_v1';
 const MAX_ACTIVE_WEBHOOK_TASKS = 16;
-const WORKER_SHUTDOWN_DRAIN_MS = 10_000;
 const WORKER_CHANNEL_DISCONNECT_DRAIN_MS =
   CHANNEL_WORKER_STOP_GRACE_MS - CHANNEL_WORKER_KILL_GRACE_MS;
 
 async function disconnectWorkerChannels(
   channels: Iterable<ChannelBase>,
+  timeoutMs = WORKER_CHANNEL_DISCONNECT_DRAIN_MS,
 ): Promise<void> {
-  let timer: NodeJS.Timeout | undefined;
-  try {
-    await Promise.race([
-      disconnectChannels(channels),
-      new Promise<void>((resolve) => {
-        timer = setTimeout(() => {
-          writeStderrLineSafe(
-            `[Channel] disconnect drain exceeded ${WORKER_CHANNEL_DISCONNECT_DRAIN_MS}ms; continuing worker shutdown.`,
-          );
-          resolve();
-        }, WORKER_CHANNEL_DISCONNECT_DRAIN_MS);
-        timer.unref();
-      }),
-    ]);
-  } finally {
-    if (timer !== undefined) clearTimeout(timer);
-  }
+  await disconnectChannels(channels, {
+    timeoutMs,
+    onTimeout: () => {
+      writeStderrLineSafe(
+        `[Channel] disconnect drain exceeded ${timeoutMs}ms; continuing worker shutdown.`,
+      );
+    },
+  });
 }
 
 interface DaemonCapabilitiesLike {
@@ -217,7 +208,7 @@ export interface ChannelDaemonWorkerHandle {
     task: ChannelWebhookTask,
     options?: ChannelWebhookRunOptions,
   ): Promise<void>;
-  close(): Promise<void>;
+  close(disconnectDrainMs?: number): Promise<void>;
 }
 
 export interface RunChannelDaemonWorkerOptions {
@@ -836,9 +827,9 @@ export async function runChannelDaemonWorker(
           await channel.runWebhookTask(task);
         }
       },
-      async close() {
+      async close(disconnectDrainMs) {
         scheduler?.stop();
-        await disconnectWorkerChannels(channels.values());
+        await disconnectWorkerChannels(channels.values(), disconnectDrainMs);
         try {
           bridge.stop();
         } finally {
@@ -1241,6 +1232,8 @@ export const daemonWorkerCommand: CommandModule<unknown, DaemonWorkerArgs> = {
           process.exit(1);
         } else {
           shuttingDown = true;
+          const shutdownDeadline =
+            Date.now() + WORKER_CHANNEL_DISCONNECT_DRAIN_MS;
           clearHeartbeat();
           unsubscribeMessage();
           try {
@@ -1263,12 +1256,15 @@ export const daemonWorkerCommand: CommandModule<unknown, DaemonWorkerArgs> = {
                   ...activeWebhookTasks.values(),
                 ]),
                 new Promise<void>((resolve) => {
-                  const timer = setTimeout(resolve, WORKER_SHUTDOWN_DRAIN_MS);
+                  const timer = setTimeout(
+                    resolve,
+                    Math.max(0, shutdownDeadline - Date.now()),
+                  );
                   timer.unref();
                 }),
               ]);
             }
-            await handle.close();
+            await handle.close(Math.max(0, shutdownDeadline - Date.now()));
           } catch (err) {
             exitCode = 1;
             const safeReason = sanitizeLogText(reason, 128);

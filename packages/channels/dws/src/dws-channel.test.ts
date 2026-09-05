@@ -2513,6 +2513,45 @@ describe('DwsChannel', () => {
     );
   });
 
+  it('does not retain prefix-filtered ambient group history', async () => {
+    const client = new FakeDwsClient();
+    const { bridge } = await readyPolicyChannel(
+      client,
+      makeConfig({
+        groupHistoryLimit: 5,
+        messagePrefix: '/review',
+        groups: {
+          '*': { requireMention: false },
+          'conversation-shadowed': { dispatchMode: 'followup' },
+        },
+      }),
+      'prefix-filtered-group-history-dws',
+      { groupHistoryPath: join(qwenHome, 'group-history.json') },
+    );
+
+    await client.emit(
+      1,
+      message(
+        'user_im_message_receive_group_all',
+        'unprefixed-ambient',
+        'unprefixed ambient chatter',
+        { conversationId: 'conversation-shadowed' },
+      ),
+    );
+    await client.emit(
+      0,
+      message(
+        'user_im_message_receive_at',
+        'prefixed-mention',
+        '@QwenBot /review summarize',
+        { conversationId: 'conversation-shadowed' },
+      ),
+    );
+
+    const prompt = String(vi.mocked(bridge.prompt).mock.calls[0]?.[1]);
+    expect(prompt).not.toContain('unprefixed ambient chatter');
+  });
+
   it('does not add an @ message twin to its own group history', async () => {
     const client = new FakeDwsClient();
     const { bridge } = await readyPolicyChannel(
@@ -2559,6 +2598,46 @@ describe('DwsChannel', () => {
     expect(nextPrompt).not.toContain('mention first twin text');
   });
 
+  it('forgets a handled slash-command twin without draining other history', async () => {
+    const client = new FakeDwsClient();
+    const { bridge } = await readyPolicyChannel(
+      client,
+      makeConfig({
+        groupHistoryLimit: 5,
+        groups: {
+          '*': { requireMention: false },
+          'conversation-command': { requireMention: true },
+        },
+      }),
+      'filtered-command-twin-dws',
+      { groupHistoryPath: join(qwenHome, 'group-history.json') },
+    );
+    const command = message(
+      'user_im_message_receive_group_all',
+      'command-twin',
+      '@QwenBot /compact',
+      { conversationId: 'conversation-command' },
+    );
+
+    await client.emit(1, command);
+    await client.emit(0, {
+      ...command,
+      type: 'user_im_message_receive_at',
+    });
+    await client.emit(
+      0,
+      message(
+        'user_im_message_receive_at',
+        'next-command-mention',
+        'what happened?',
+        { conversationId: 'conversation-command' },
+      ),
+    );
+
+    const nextPrompt = String(vi.mocked(bridge.prompt).mock.calls[1]?.[1]);
+    expect(nextPrompt).not.toContain('/compact');
+  });
+
   it('rejects full-capacity admission without waiting', async () => {
     const client = new FakeDwsClient();
     const channel = await readyChannel(client);
@@ -2574,6 +2653,26 @@ describe('DwsChannel', () => {
     );
 
     expect(channel.pendingMessageCapacityWaiterCount()).toBe(0);
+  });
+
+  it('dispatches an at-message without parking when capacity is full', async () => {
+    const client = new FakeDwsClient();
+    const channel = await readyChannel(client);
+    channel.seedPendingMessages(5_000);
+
+    await client.emit(
+      0,
+      message(
+        'user_im_message_receive_at',
+        'at-capacity',
+        'please handle this mention',
+      ),
+    );
+
+    expect(channel.inbound).toEqual([
+      expect.objectContaining({ messageId: 'at-capacity' }),
+    ]);
+    expect(channel.pendingMessageIds()).toHaveLength(5_000);
   });
 
   it('does not let an older task delete a replacement queue entry', async () => {
@@ -7068,7 +7167,7 @@ describe('DwsChannel', () => {
     expect(channel.mentionWatermark()).toBeGreaterThan(0);
   });
 
-  it('does not dispatch an ambient message before admission is durable', async () => {
+  it('best-effort dispatches ambient messages when cursor persistence fails', async () => {
     const client = new FakeDwsClient();
     const channel = await readyChannel(
       client,
@@ -7083,11 +7182,8 @@ describe('DwsChannel', () => {
       { conversationId: 'cid-group' },
     );
 
-    await expect(client.emit(1, event)).rejects.toThrow('disk unavailable');
-    expect(channel.inboundAttempts).toBe(0);
-    expect(channel.pendingMessageIds()).toEqual([]);
-
     await expect(client.emit(1, event)).rejects.toThrow('agent unavailable');
+    expect(channel.inboundAttempts).toBe(1);
     expect(channel.pendingMessageIds()).toEqual(['ambient-save-failure']);
     expect(channel.inboundFailures()).toEqual([
       expect.objectContaining({ attempts: 1 }),
@@ -7098,6 +7194,25 @@ describe('DwsChannel', () => {
     expect(channel.inbound).toEqual([
       expect.objectContaining({ messageId: 'ambient-save-failure' }),
     ]);
+  });
+
+  it('still rejects at-message admission when cursor persistence fails', async () => {
+    const client = new FakeDwsClient();
+    const channel = await readyChannel(client);
+    channel.nextCursorSaveError = new Error('disk unavailable');
+
+    await expect(
+      client.emit(
+        0,
+        message(
+          'user_im_message_receive_at',
+          'at-save-failure',
+          'please retry this mention',
+        ),
+      ),
+    ).rejects.toThrow('disk unavailable');
+    expect(channel.inboundAttempts).toBe(0);
+    expect(channel.pendingMessageIds()).toEqual([]);
   });
 
   it('keeps failed ambient parking behind the pending-message cap', async () => {

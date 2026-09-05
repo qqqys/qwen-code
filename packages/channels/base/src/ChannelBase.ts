@@ -4662,6 +4662,8 @@ export abstract class ChannelBase {
       return false;
     }
 
+    this.forgetPendingGroupHistory(envelope);
+
     // Surface the drop — otherwise an unanswered queued message vanishes
     // silently, making "my message was never answered" undiagnosable.
     // envelope.text is attacker-controlled, so neutralize it with the shared
@@ -5719,6 +5721,20 @@ export abstract class ChannelBase {
     }
   }
 
+  private forgetPendingGroupHistory(envelope: Envelope): void {
+    if (envelope.messageId === undefined) return;
+    try {
+      this.groupHistory.forget(
+        this.groupHistoryKey(envelope),
+        truncateGroupHistoryField(envelope.messageId),
+      );
+    } catch (err) {
+      process.stderr.write(
+        `[${this.name}] failed to forget group history for chat ${sanitizeLogText(envelope.chatId, 64)}: ${err instanceof Error ? err.message : err}\n`,
+      );
+    }
+  }
+
   private clearPendingGroupHistory(envelope: Envelope): void {
     if (!envelope.isGroup && this.config.sessionScope !== 'single') {
       return;
@@ -6768,6 +6784,9 @@ export abstract class ChannelBase {
         recallRead?.generation === recallRead?.state.generation
           ? recallContext
           : undefined;
+      if (recognizedSlashCommand) {
+        this.forgetPendingGroupHistory(envelope);
+      }
       const groupHistoryEntries = recognizedSlashCommand
         ? []
         : this.drainPendingGroupHistory(envelope);
