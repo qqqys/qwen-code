@@ -862,6 +862,9 @@ describe('/peers controllers', () => {
     const out = await run(fake, 'controllers');
     expect(out.messageType).toBe('info');
     expect(out.content).toContain('No trusted controllers');
+    expect(out.content).toContain('process this session started');
+    expect(out.content).toContain('asserts no review class');
+    expect(out.content).toContain('crossSessionInbound to "hold"');
     expect(out.content).toContain('qwen sessions controllers add');
   });
 

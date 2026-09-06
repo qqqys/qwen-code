@@ -358,12 +358,11 @@ export interface PeerInboxOptions {
    *
    * A function rather than a list of tokens because the answer must be
    * current: grants live in a file the user edits with
-   * `qwen sessions controllers`, and reading it per auth line is what
-   * makes both adding and revoking one take effect without a restart.
-   * Called for every auth line, like the two token comparisons above and
-   * for the same reason, so it must be cheap on a token that is plainly
-   * not a grant. It should not throw; one that does is treated as "not a
-   * controller".
+   * `qwen sessions controllers`, and reading it at authentication and at
+   * bounded intervals while a controller connection remains open is what
+   * makes both adding and revoking one take effect without a restart. It
+   * must be cheap on a token that is plainly not a grant. It should not
+   * throw; one that does is treated as "not a controller".
    *
    * Ignored unless `requiredToken` is set, like `childToken`: without an
    * admission requirement there is nothing to tell apart.
@@ -804,6 +803,33 @@ async function bindAt(
 
     let authed = options.requiredToken === undefined;
     let credential: PeerConnectionCredential | undefined;
+    let controllerToken: string | undefined;
+    let controllerDeadline: NodeJS.Timeout | null = null;
+    const armControllerRevalidation = () => {
+      if (controllerDeadline) clearTimeout(controllerDeadline);
+      controllerDeadline = setTimeout(() => {
+        controllerDeadline = null;
+        if (
+          refused ||
+          credential?.kind !== 'controller' ||
+          controllerToken === undefined
+        ) {
+          return;
+        }
+        const controller = resolveController(options, controllerToken);
+        if (!controller) {
+          debugLogger.debug(
+            'dropping a controller connection whose grant was revoked',
+          );
+          refused = true;
+          socket.destroy();
+          return;
+        }
+        credential = { kind: 'controller', controller };
+        armControllerRevalidation();
+      }, lineDeadlineMs);
+      controllerDeadline.unref();
+    };
     // destroy() does not stop lines already buffered from this chunk, and
     // a failed line followed by a *valid* auth line must not resurrect
     // the connection — the refusal is terminal.
@@ -822,6 +848,10 @@ async function bindAt(
           }
           if (credential !== undefined) {
             authed = true;
+            if (credential.kind === 'controller') {
+              controllerToken = presented ?? undefined;
+              armControllerRevalidation();
+            }
             return;
           }
           debugLogger.debug(
@@ -871,6 +901,8 @@ async function bindAt(
     socket.on('close', () => {
       if (deadline) clearTimeout(deadline);
       deadline = null;
+      if (controllerDeadline) clearTimeout(controllerDeadline);
+      controllerDeadline = null;
       connections.delete(socket);
     });
   });
@@ -1027,20 +1059,27 @@ function authKindOf(
   // the one check here that can fail for reasons unrelated to the token.
   // A failure is "not a controller", never an admission and never a
   // crash in the connection handler.
-  let controller: PeerControllerIdentity | undefined;
+  const controller = resolveController(options, presented);
+  if (peer) return { kind: 'peer' };
+  if (child) return { kind: 'child' };
+  if (controller) return { kind: 'controller', controller };
+  return undefined;
+}
+
+function resolveController(
+  options: Pick<PeerInboxOptions, 'resolveController'>,
+  presented: string,
+): PeerControllerIdentity | undefined {
   try {
-    controller = options.resolveController?.(presented);
+    return options.resolveController?.(presented);
   } catch (error) {
     debugLogger.debug(
       `controller resolver threw (treating the token as unknown): ${describe(
         error,
       )}`,
     );
+    return undefined;
   }
-  if (peer) return { kind: 'peer' };
-  if (child) return { kind: 'child' };
-  if (controller) return { kind: 'controller', controller };
-  return undefined;
 }
 
 function describe(error: unknown): string {

@@ -185,6 +185,10 @@ export function getPeerControllerRegistryPath(): string {
   return defaultRegistryPath;
 }
 
+export function resetPeerControllerRegistryPathForTest(): void {
+  defaultRegistryPath = undefined;
+}
+
 export function hashControllerToken(token: string): string {
   return createHash('sha256').update(token, 'utf8').digest('hex');
 }
@@ -416,15 +420,19 @@ async function writeRegistry(
 function invalidRegistry(
   filePath: string,
   reason: string,
+  readOnly = false,
 ): PeerControllerError {
   return new PeerControllerError(
-    `Refusing to modify ${filePath}: ${reason}. Move it aside or repair it first.`,
+    readOnly
+      ? `Cannot read ${filePath}: ${reason}. Repair it, or move it aside to revoke every grant.`
+      : `Refusing to modify ${filePath}: ${reason}. Move it aside or repair it first.`,
     'invalid-registry',
   );
 }
 
 function readPeerControllerRegistryStrictSync(
   filePath: string,
+  options: { skipMalformedEntries?: boolean; readOnly?: boolean } = {},
 ): PeerControllerRegistry {
   let raw: string;
   try {
@@ -436,12 +444,17 @@ function readPeerControllerRegistryStrictSync(
           'unsafe-path',
         );
       }
-      throw invalidRegistry(filePath, 'it is not a regular file');
+      throw invalidRegistry(
+        filePath,
+        'it is not a regular file',
+        options.readOnly,
+      );
     }
     if (stats.size > MAX_REGISTRY_BYTES) {
       throw invalidRegistry(
         filePath,
         `it exceeds the ${MAX_REGISTRY_BYTES}-byte limit`,
+        options.readOnly,
       );
     }
     raw = fsSync.readFileSync(filePath, 'utf8');
@@ -454,21 +467,30 @@ function readPeerControllerRegistryStrictSync(
   try {
     parsed = JSON.parse(raw);
   } catch {
-    throw invalidRegistry(filePath, 'it is not valid JSON');
+    throw invalidRegistry(filePath, 'it is not valid JSON', options.readOnly);
   }
   if (
     !isRecord(parsed) ||
     parsed['schemaVersion'] !== PEER_CONTROLLER_SCHEMA_VERSION ||
     !Array.isArray(parsed['controllers'])
   ) {
-    throw invalidRegistry(filePath, 'it has an unsupported shape or version');
+    throw invalidRegistry(
+      filePath,
+      'it has an unsupported shape or version',
+      options.readOnly,
+    );
   }
 
   const controllers: PeerControllerRecord[] = [];
   for (const entry of parsed['controllers']) {
     const record = toValidRecord(entry);
     if (record === null) {
-      throw invalidRegistry(filePath, 'it contains a malformed controller');
+      if (options.skipMalformedEntries) continue;
+      throw invalidRegistry(
+        filePath,
+        'it contains a malformed controller',
+        options.readOnly,
+      );
     }
     controllers.push(record);
   }
@@ -505,7 +527,10 @@ async function withRegistryLock<T>(
 export async function listPeerControllers(
   filePath: string = getPeerControllerRegistryPath(),
 ): Promise<PeerControllerRecord[]> {
-  return readPeerControllerRegistryStrictSync(filePath).controllers;
+  return readPeerControllerRegistryStrictSync(filePath, {
+    skipMalformedEntries: true,
+    readOnly: true,
+  }).controllers;
 }
 
 /**
@@ -585,7 +610,9 @@ export async function removePeerController(
   filePath: string = getPeerControllerRegistryPath(),
 ): Promise<PeerControllerRecord | null> {
   return withRegistryLock(filePath, async () => {
-    const registry = readPeerControllerRegistryStrictSync(filePath);
+    const registry = readPeerControllerRegistryStrictSync(filePath, {
+      skipMalformedEntries: true,
+    });
     const needle = id.trim().toLowerCase();
     const removed = registry.controllers.find(
       (record) => record.id.toLowerCase() === needle,
@@ -594,7 +621,7 @@ export async function removePeerController(
     await writeRegistry(filePath, {
       schemaVersion: PEER_CONTROLLER_SCHEMA_VERSION,
       controllers: registry.controllers.filter(
-        (record) => record.id.toLowerCase() !== needle,
+        (record) => record.tokenHash !== removed.tokenHash,
       ),
     });
     return removed;

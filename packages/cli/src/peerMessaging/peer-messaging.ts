@@ -30,6 +30,7 @@ import {
   createDebugLogger,
   formatPeerDisplay,
   formatPeerEnvelope,
+  getPeerControllerRegistryPath,
   InboundGate,
   MAX_HELD_MESSAGES,
   type HeldMessage,
@@ -199,6 +200,8 @@ export class PeerMessaging {
     options: PeerMessagingOptions,
   ): Promise<PeerMessaging | null> {
     const messaging = new PeerMessaging();
+    const controllerRegistryPath =
+      options.controllerRegistryPath ?? getPeerControllerRegistryPath();
 
     const gate = new InboundGate({
       getApprovalMode: options.getApprovalMode,
@@ -262,7 +265,7 @@ export class PeerMessaging {
       // the user mints or revokes mid-session must take effect on the
       // next connection, with nothing to restart.
       resolveController: (presented) =>
-        resolveControllerToken(presented, options.controllerRegistryPath),
+        resolveControllerToken(presented, controllerRegistryPath),
       onFrame: (frame, auth, controller) =>
         messaging.onFrame(frame, {
           selfSent: auth === 'child',

@@ -198,7 +198,7 @@ export function formatControllerList(
   }
   if (controllers.length === 0) {
     return (
-      'No trusted controllers. Without an explicit "accept" setting, messages from a program that is not a Qwen Code session are held for your review.\n' +
+      'No trusted controllers. Without an explicit "accept" setting, a message that asserts no review class is held for your review, except one from a process this session started, which is always accepted. A sender\'s own review-class claim is not authenticated; set agents.crossSessionInbound to "hold" to review every inbound message.\n' +
       'Add one with: qwen sessions controllers add --label <name>'
     );
   }
@@ -211,7 +211,7 @@ export function formatControllerList(
   return [
     `${controllers.length} trusted controller${
       controllers.length === 1 ? '' : 's'
-    }. Messages presenting one of these tokens are delivered without per-message review unless crossSessionInbound is "hold" or "refuse":`,
+    }. Messages presenting one of these tokens are delivered without per-message review unless crossSessionInbound is "hold" or "refuse". A process this session started is always accepted; other senders' review-class claims are not authenticated, so set crossSessionInbound to "hold" to review every inbound message:`,
     ...lines,
     '',
     'Revoke with /peers revoke <id>.',

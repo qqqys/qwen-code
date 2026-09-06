@@ -22,6 +22,7 @@ import {
   MAX_HELD_MESSAGES,
   MAX_SETTLED_IDS,
   removePeerController,
+  resetPeerControllerRegistryPathForTest,
   resetSentPeerMessagesForTest,
   sendPeerFrame,
   startPeerInbox,
@@ -1679,6 +1680,41 @@ describe.skipIf(isWindows)('controller grants', () => {
     await settle();
     expect(submitted).toHaveLength(1);
     expect(submitted[0].modelText).toContain('origin="controller"');
+  });
+
+  it('pins a relative controller registry path before the cwd changes', async () => {
+    const originalCwd = process.cwd();
+    const originalHome = process.env['QWEN_HOME'];
+    const relativeHome = 'relative-qwen-home';
+    try {
+      process.env['QWEN_HOME'] = relativeHome;
+      process.chdir(tmpDir);
+      resetPeerControllerRegistryPathForTest();
+      const expectedRegistry = path.join(
+        tmpDir,
+        relativeHome,
+        'peer-controllers.json',
+      );
+      const { token } = await addPeerController(
+        'voice bridge',
+        expectedRegistry,
+      );
+      const { messaging: m, submitted } = await start(ApprovalMode.DEFAULT);
+
+      process.chdir(path.dirname(tmpDir));
+      await send(m.socketPath!, buildUserFrame({ content: 'after cd' }), {
+        authToken: token,
+      });
+      await settle();
+
+      expect(submitted).toHaveLength(1);
+      expect(submitted[0].modelText).toContain('origin="controller"');
+    } finally {
+      process.chdir(originalCwd);
+      if (originalHome === undefined) delete process.env['QWEN_HOME'];
+      else process.env['QWEN_HOME'] = originalHome;
+      resetPeerControllerRegistryPathForTest();
+    }
   });
 
   it('keeps controller attribution while waiting for the UI submitter', async () => {

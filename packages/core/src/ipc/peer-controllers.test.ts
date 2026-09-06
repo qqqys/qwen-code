@@ -22,9 +22,11 @@ import {
   PeerControllerError,
   type PeerControllerRecord,
   readPeerControllerRegistrySync,
+  resetPeerControllerRegistryPathForTest,
   removePeerController,
   resolveControllerToken,
 } from './peer-controllers.js';
+import { mockCompromisedLock } from '../test-utils/mock-compromised-lock.js';
 
 const isWindows = process.platform === 'win32';
 
@@ -32,11 +34,13 @@ let tmpDir: string;
 let registryPath: string;
 
 beforeEach(async () => {
+  resetPeerControllerRegistryPathForTest();
   tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'qwen-controllers-'));
   registryPath = path.join(tmpDir, 'peer-controllers.json');
 });
 
 afterEach(async () => {
+  resetPeerControllerRegistryPathForTest();
   await fs.rm(tmpDir, { recursive: true, force: true });
 });
 
@@ -147,12 +151,61 @@ describe('addPeerController', () => {
     ).toEqual(['four', 'one', 'three', 'two']);
   });
 
+  it('completes a write after a stale-lock takeover', async () => {
+    const { lockSpy, getOnCompromised } = mockCompromisedLock();
+    try {
+      const added = await addPeerController('voice', registryPath);
+      expect(added.record.label).toBe('voice');
+      expect(getOnCompromised()).toBeTypeOf('function');
+      expect((await readRaw()).controllers).toContainEqual(added.record);
+    } finally {
+      lockSpy.mockRestore();
+    }
+  });
+
   it('refuses to overwrite a malformed registry', async () => {
     await writeRaw('{ not json');
     await expect(
       addPeerController('voice', registryPath),
     ).rejects.toMatchObject({ code: 'invalid-registry' });
     expect(await fs.readFile(registryPath, 'utf8')).toBe('{ not json');
+  });
+
+  it('refuses to overwrite a registry with a malformed entry', async () => {
+    const malformed = JSON.stringify({
+      schemaVersion: PEER_CONTROLLER_SCHEMA_VERSION,
+      controllers: [
+        {
+          id: 'c_00000001',
+          label: 'voice',
+          tokenHash: 'f'.repeat(64),
+          createdAt: 'yesterday',
+        },
+      ],
+    });
+    await writeRaw(malformed);
+    await expect(
+      addPeerController('second', registryPath),
+    ).rejects.toMatchObject({ code: 'invalid-registry' });
+    expect(await fs.readFile(registryPath, 'utf8')).toBe(malformed);
+  });
+
+  it('refuses to overwrite an oversized or foreign-version registry', async () => {
+    const inputs = [
+      JSON.stringify({
+        schemaVersion: PEER_CONTROLLER_SCHEMA_VERSION,
+        controllers: [],
+        padding: 'x'.repeat(64 * 1024),
+      }),
+      JSON.stringify({ schemaVersion: 2, controllers: [] }),
+    ];
+    for (const raw of inputs) {
+      await writeRaw(raw);
+      await expect(
+        addPeerController('voice', registryPath),
+      ).rejects.toMatchObject({ code: 'invalid-registry' });
+      expect(await fs.readFile(registryPath, 'utf8')).toBe(raw);
+    }
   });
 
   it('flattens a label before storing it', async () => {
@@ -266,6 +319,55 @@ describe('removePeerController', () => {
     ]);
     expect(await listPeerControllers(registryPath)).toEqual([]);
   });
+
+  it('revokes every record that carries the same credential', async () => {
+    const token = mintControllerToken();
+    const tokenHash = hashControllerToken(token);
+    await writeRaw(
+      JSON.stringify({
+        schemaVersion: PEER_CONTROLLER_SCHEMA_VERSION,
+        controllers: [
+          { id: 'c_00000001', label: 'first', tokenHash, createdAt: 1 },
+          { id: 'c_00000002', label: 'second', tokenHash, createdAt: 2 },
+        ],
+      }),
+    );
+
+    await expect(
+      removePeerController('c_00000001', registryPath),
+    ).resolves.toMatchObject({ id: 'c_00000001' });
+    expect(resolveControllerToken(token, registryPath)).toBeUndefined();
+    expect(await listPeerControllers(registryPath)).toEqual([]);
+  });
+
+  it('drops malformed entries while revoking a valid grant', async () => {
+    const { record, token } = await addPeerController('voice', registryPath);
+    await writeRaw(
+      JSON.stringify({
+        schemaVersion: PEER_CONTROLLER_SCHEMA_VERSION,
+        controllers: [{ ...record, createdAt: 'yesterday' }, record],
+      }),
+    );
+
+    expect(await listPeerControllers(registryPath)).toEqual([record]);
+    await expect(
+      removePeerController(record.id, registryPath),
+    ).resolves.toMatchObject({ id: record.id });
+    expect(resolveControllerToken(token, registryPath)).toBeUndefined();
+    expect((await readRaw()).controllers).toEqual([]);
+  });
+
+  it.skipIf(isWindows)('still refuses a symlinked registry', async () => {
+    const real = path.join(tmpDir, 'elsewhere.json');
+    await fs.writeFile(real, '{}', 'utf8');
+    await fs.symlink(real, registryPath);
+    await expect(listPeerControllers(registryPath)).rejects.toMatchObject({
+      code: 'unsafe-path',
+    });
+    await expect(
+      removePeerController('c_00000001', registryPath),
+    ).rejects.toMatchObject({ code: 'unsafe-path' });
+  });
 });
 
 describe('readPeerControllerRegistrySync', () => {
@@ -290,6 +392,7 @@ describe('readPeerControllerRegistrySync', () => {
     );
     await expect(listPeerControllers(registryPath)).rejects.toMatchObject({
       code: 'invalid-registry',
+      message: expect.not.stringContaining('Refusing to modify'),
     });
   });
 
@@ -391,6 +494,23 @@ describe('matchControllerToken', () => {
     ).toEqual({ id: second.record.id, label: 'second' });
   });
 
+  it('scans every record and returns the last matching identity', () => {
+    const token = mintControllerToken();
+    const tokenHash = hashControllerToken(token);
+    expect(
+      matchControllerToken(
+        {
+          schemaVersion: PEER_CONTROLLER_SCHEMA_VERSION,
+          controllers: [
+            { id: 'c_00000001', label: 'first', tokenHash, createdAt: 1 },
+            { id: 'c_00000002', label: 'second', tokenHash, createdAt: 2 },
+          ],
+        },
+        token,
+      ),
+    ).toEqual({ id: 'c_00000002', label: 'second' });
+  });
+
   it('rejects a token without the prefix', async () => {
     const { token } = await addPeerController('voice', registryPath);
     const registry = readPeerControllerRegistrySync(registryPath);
@@ -471,6 +591,26 @@ describe('getPeerControllerRegistryPath', () => {
       process.chdir(originalCwd);
       if (originalHome === undefined) delete process.env['QWEN_HOME'];
       else process.env['QWEN_HOME'] = originalHome;
+    }
+  });
+
+  it('uses one default path for minting, resolving, listing, and revoking', async () => {
+    const originalHome = process.env['QWEN_HOME'];
+    try {
+      process.env['QWEN_HOME'] = path.join(tmpDir, 'qwen-home');
+      resetPeerControllerRegistryPathForTest();
+      const { record, token } = await addPeerController('voice');
+      expect(resolveControllerToken(token)).toEqual({
+        id: record.id,
+        label: 'voice',
+      });
+      expect(await listPeerControllers()).toEqual([record]);
+      expect(await removePeerController(record.id)).toEqual(record);
+      expect(resolveControllerToken(token)).toBeUndefined();
+    } finally {
+      if (originalHome === undefined) delete process.env['QWEN_HOME'];
+      else process.env['QWEN_HOME'] = originalHome;
+      resetPeerControllerRegistryPathForTest();
     }
   });
 });

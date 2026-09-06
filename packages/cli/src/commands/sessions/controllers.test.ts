@@ -25,6 +25,7 @@ vi.mock('@qwen-code/qwen-code-core', () => ({
   listPeerControllers: (...args: unknown[]) => listPeerControllers(...args),
   removePeerController: (...args: unknown[]) => removePeerController(...args),
   getPeerControllerRegistryPath: () => '/home/u/.qwen/peer-controllers.json',
+  MAX_CONTROLLER_LABEL_CHARS: 40,
   PeerControllerError: FakePeerControllerError,
 }));
 
@@ -44,6 +45,9 @@ const {
   ID_COL,
   LABEL_COL,
 } = await import('./controllers.js');
+const { MAX_CONTROLLER_LABEL_CHARS } = await import(
+  '@qwen-code/qwen-code-core'
+);
 
 const TOKEN = `qpc_${'a'.repeat(64)}`;
 
@@ -195,7 +199,18 @@ describe('controllers list', () => {
   });
 
   it('shows the full label at the supported length limit', async () => {
-    const shared = 'x'.repeat(39);
+    const shared = 'x'.repeat(MAX_CONTROLLER_LABEL_CHARS - 1);
+    listPeerControllers.mockResolvedValue([
+      record({ label: `${shared}a` }),
+      record({ id: 'c_89abcdef', label: `${shared}b` }),
+    ]);
+    await handleControllerList({});
+    expect(stdout.join('\n')).toContain(`${shared}a`);
+    expect(stdout.join('\n')).toContain(`${shared}b`);
+  });
+
+  it('keeps admissible wide labels distinguishable', async () => {
+    const shared = '語'.repeat(MAX_CONTROLLER_LABEL_CHARS - 1);
     listPeerControllers.mockResolvedValue([
       record({ label: `${shared}a` }),
       record({ id: 'c_89abcdef', label: `${shared}b` }),
@@ -244,6 +259,20 @@ describe('controllers list', () => {
     listPeerControllers.mockRejectedValue(new Error('EACCES'));
     await handleControllerList({});
     expect(stderr.join('\n')).toContain('EACCES');
+    expect(exitCode).toBe(1);
+  });
+
+  it('does not duplicate the path in a structured read error', async () => {
+    listPeerControllers.mockRejectedValue(
+      new FakePeerControllerError(
+        'Cannot read /home/u/.qwen/peer-controllers.json: it is not valid JSON.',
+        'invalid-registry',
+      ),
+    );
+    await handleControllerList({});
+    expect(stderr).toEqual([
+      'Error: Cannot read /home/u/.qwen/peer-controllers.json: it is not valid JSON.',
+    ]);
     expect(exitCode).toBe(1);
   });
 });
@@ -295,18 +324,20 @@ describe('controllers remove', () => {
 });
 
 describe('controllers command wiring', () => {
-  it('registers every subcommand and requires an add label', () => {
+  it('registers and dispatches every subcommand', async () => {
     const add = { option: vi.fn().mockReturnThis() };
+    type Definition = {
+      command: string;
+      builder?: (args: typeof add) => unknown;
+      handler?: (args: Record<string, unknown>) => Promise<void>;
+    };
+    const definitions: Definition[] = [];
     const root = {
-      command: vi.fn(
-        (definition: {
-          command: string;
-          builder?: (args: typeof add) => unknown;
-        }) => {
-          if (definition.command === 'add') definition.builder?.(add);
-          return root;
-        },
-      ),
+      command: vi.fn((definition: Definition) => {
+        definitions.push(definition);
+        if (definition.command === 'add') definition.builder?.(add);
+        return root;
+      }),
       demandCommand: vi.fn().mockReturnThis(),
       version: vi.fn().mockReturnThis(),
     };
@@ -328,5 +359,18 @@ describe('controllers command wiring', () => {
       1,
       'You need at least one command before continuing.',
     );
+
+    addPeerController.mockResolvedValue({ record: record(), token: TOKEN });
+    listPeerControllers.mockResolvedValue([]);
+    removePeerController.mockResolvedValue(record());
+    await definitions.find((entry) => entry.command === 'add')!.handler!({
+      label: 'voice',
+    });
+    await definitions.find((entry) => entry.command === 'list')!.handler!({});
+    await definitions.find((entry) => entry.command === 'remove <id>')!
+      .handler!({ id: 'c_1' });
+    expect(addPeerController).toHaveBeenCalledWith('voice');
+    expect(listPeerControllers).toHaveBeenCalledOnce();
+    expect(removePeerController).toHaveBeenCalledWith('c_1');
   });
 });

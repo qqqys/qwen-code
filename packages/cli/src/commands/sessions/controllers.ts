@@ -20,6 +20,7 @@ import {
   addPeerController,
   getPeerControllerRegistryPath,
   listPeerControllers,
+  MAX_CONTROLLER_LABEL_CHARS,
   PeerControllerError,
   type PeerControllerRecord,
   removePeerController,
@@ -31,9 +32,9 @@ import {
 } from '../../ui/utils/textUtils.js';
 import { writeStderrLine, writeStdoutLine } from '../../utils/stdioHelpers.js';
 
-/** Fixed column widths for the human-readable table (exported for tests). */
+/** A code unit may occupy two display columns; two more separate the fields. */
 export const ID_COL = 12;
-export const LABEL_COL = 42;
+export const LABEL_COL = MAX_CONTROLLER_LABEL_CHARS * 2 + 2;
 
 /**
  * Sanitize a field for terminal output.
@@ -130,7 +131,9 @@ async function handleControllerList(argv: ListArgs): Promise<void> {
     records = await listPeerControllers();
   } catch (error) {
     writeStderrLine(
-      `Error: could not read ${getPeerControllerRegistryPath()}: ${describeError(error)}`,
+      error instanceof PeerControllerError
+        ? `Error: ${error.message}`
+        : `Error: could not read ${getPeerControllerRegistryPath()}: ${describeError(error)}`,
     );
     process.exit(1);
     return;

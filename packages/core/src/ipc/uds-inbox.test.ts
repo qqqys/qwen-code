@@ -994,12 +994,14 @@ describe.skipIf(isWindows)('controller grants', () => {
     resolveController?: (
       presented: string,
     ) => PeerControllerIdentity | undefined,
+    lineDeadlineMs?: number,
   ): Promise<PeerInbox> {
     const started = await startPeerInbox({
       socketPath: path.join(tmpDir, 'socks', 'controller.sock'),
       requiredToken: PEER,
       childToken: CHILD,
       ...(resolveController ? { resolveController } : {}),
+      ...(lineDeadlineMs !== undefined ? { lineDeadlineMs } : {}),
       onFrame: (frame, auth, controller) => {
         received.push(frame);
         admitted.push(auth);
@@ -1055,6 +1057,37 @@ describe.skipIf(isWindows)('controller grants', () => {
     expect(controllers).toEqual([IDENTITY, IDENTITY]);
     expect(resolver).toHaveBeenCalledOnce();
     expect(resolver).toHaveBeenCalledWith(GRANT);
+  });
+
+  it('drops an open controller connection after its grant is revoked', async () => {
+    let granted = true;
+    const resolver = vi.fn((presented: string) =>
+      presented === GRANT && granted ? IDENTITY : undefined,
+    );
+    const started = await listenWithController(resolver, 120);
+    const socket = await connectRaw(started.socketPath);
+    const closed = new Promise<void>((resolve) =>
+      socket.once('close', resolve),
+    );
+
+    socket.write(
+      buildAuthLine(GRANT) +
+        encodePeerFrame(buildUserFrame({ content: 'before' })),
+    );
+    await settle();
+    granted = false;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    socket.write(encodePeerFrame(buildUserFrame({ content: 'within-window' })));
+    await settle();
+    await closed;
+
+    expect(
+      received.map(
+        (frame) => (frame as { message: { content: string } }).message.content,
+      ),
+    ).toEqual(['before', 'within-window']);
+    expect(resolver).toHaveBeenCalledTimes(2);
+    expect(resolver).toHaveBeenLastCalledWith(GRANT);
   });
 
   it('drops a connection whose token no grant resolves', async () => {
