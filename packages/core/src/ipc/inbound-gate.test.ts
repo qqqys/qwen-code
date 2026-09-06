@@ -1192,6 +1192,21 @@ describe('controller grants', () => {
     expect(h.deliveredControllers).toEqual([VOICE]);
   });
 
+  it('forgets a revoked grant before automatic re-evaluation', () => {
+    const h = harness({ mode: ApprovalMode.DEFAULT, policy: 'hold' });
+    const f = frame();
+    h.gate.admit(f, viaController);
+
+    expect(h.gate.forgetController(VOICE.id)).toBe(1);
+    expect(h.gate.getHeld()).toMatchObject([{ cause: 'explicit-setting' }]);
+    expect(h.gate.getHeld()[0].controller).toBeUndefined();
+
+    h.setPolicy(undefined);
+    expect(h.gate.reevaluate('setting cleared')).toBe(0);
+    expect(h.delivered).toHaveLength(0);
+    expect(h.gate.getHeld()).toMatchObject([{ cause: 'no-mode-asserted' }]);
+  });
+
   it('keeps its origin when re-evaluation changes only the hold cause', () => {
     const h = harness({ mode: ApprovalMode.DEFAULT, policy: 'hold' });
     const f = frame();

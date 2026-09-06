@@ -224,9 +224,8 @@ export interface HeldMessage {
    *
    * Kept on the entry because a controller's message is still parked by
    * an explicit `hold`, and releasing it has to rebuild the same envelope
-   * it would have had on arrival. Recorded as it was at arrival: revoking
-   * the grant afterwards does not re-attribute a message already waiting
-   * — the user drops it with `/peers deny` if that is what they want.
+   * it would have had on arrival. The in-session revoke path removes this
+   * identity before the message can be released or re-evaluated.
    */
   controller?: PeerControllerIdentity;
 }
@@ -361,6 +360,25 @@ export class InboundGate {
   /** Messages currently parked, oldest first. */
   getHeld(): readonly HeldMessage[] {
     return this.held;
+  }
+
+  /** Remove a revoked grant's authority from messages already waiting. */
+  forgetController(id: string): number {
+    let forgotten = 0;
+    for (let index = 0; index < this.held.length; index += 1) {
+      const entry = this.held[index];
+      if (!entry || entry.controller?.id !== id) continue;
+
+      const next = { ...entry };
+      delete next.controller;
+      this.held[index] = withCause(
+        next,
+        this.resolvePolicy(next.frame, originOf(next)),
+      );
+      forgotten += 1;
+    }
+    if (forgotten > 0) this.notifyHeldChange();
+    return forgotten;
   }
 
   /**

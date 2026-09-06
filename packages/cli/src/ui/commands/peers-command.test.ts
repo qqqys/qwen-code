@@ -125,6 +125,7 @@ interface Fake {
   getHeld: () => readonly HeldMessage[];
   getHeldExpiryMs: () => number | null;
   decide: ReturnType<typeof vi.fn>;
+  forgetController: ReturnType<typeof vi.fn>;
   recordHeldListing: ReturnType<typeof vi.fn>;
   heldSetChangedSinceListing: () => boolean;
 }
@@ -170,6 +171,7 @@ beforeEach(() => {
     getHeld: () => messages,
     getHeldExpiryMs: () => null,
     decide: vi.fn(() => 'done'),
+    forgetController: vi.fn(() => 0),
     recordHeldListing: vi.fn(
       (entries: readonly HeldMessage[]) =>
         (listed = entries.map((entry) => ({
@@ -920,10 +922,17 @@ describe('/peers revoke', () => {
   });
 
   it('revokes by id and says when it takes effect', async () => {
+    fake.forgetController.mockReturnValue(1);
     const out = await run(fake, 'revoke c_0123abcd');
     expect(out.messageType).toBe('info');
     expect(out.content).toContain('Revoked the controller "voice bridge"');
-    expect(out.content).toContain('next connection');
+    expect(out.content).toContain(
+      'new connections can no longer use its token',
+    );
+    expect(out.content).toContain(
+      '1 held message from it remains parked for review as an ordinary peer message',
+    );
+    expect(fake.forgetController).toHaveBeenCalledWith('c_0123abcd');
     expect(controllers.records).toHaveLength(0);
   });
 

@@ -417,6 +417,11 @@ export class PeerMessaging {
     return this.gate?.decide(msgId, decision) ?? 'gone';
   }
 
+  /** Remove a revoked grant's authority from messages already waiting. */
+  forgetController(id: string): number {
+    return this.gate?.forgetController(id) ?? 0;
+  }
+
   /** Release everything the gate now considers acceptable. */
   reevaluate(reason: string): number {
     return this.gate?.reevaluate(reason) ?? 0;

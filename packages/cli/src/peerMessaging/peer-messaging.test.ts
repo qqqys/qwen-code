@@ -1769,6 +1769,29 @@ describe.skipIf(isWindows)('controller grants', () => {
     );
   });
 
+  it('keeps a revoked controller message parked without controller authority', async () => {
+    let policy: 'hold' | undefined = 'hold';
+    const { id, token } = await grant('voice bridge');
+    const { messaging: m, submitted } = await start(ApprovalMode.DEFAULT, {
+      controllerRegistryPath: registryPath,
+      getPolicySetting: () => policy,
+    });
+
+    await send(m.socketPath!, buildUserFrame({ content: 'open the diff' }), {
+      authToken: token,
+    });
+    await settle();
+
+    expect(await removePeerController(id, registryPath)).not.toBeNull();
+    expect(m.forgetController(id)).toBe(1);
+    expect(m.getHeld()[0].controller).toBeUndefined();
+
+    policy = undefined;
+    expect(m.reevaluate('setting cleared')).toBe(0);
+    expect(submitted).toHaveLength(0);
+    expect(m.getHeld()).toMatchObject([{ cause: 'no-mode-asserted' }]);
+  });
+
   it('is unavailable when this home has minted nothing', async () => {
     const { messaging: m, submitted } = await start(ApprovalMode.DEFAULT, {
       controllerRegistryPath: registryPath,

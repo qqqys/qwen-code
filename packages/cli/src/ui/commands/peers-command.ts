@@ -275,12 +275,24 @@ export const peersCommand: SlashCommand = {
           content: `No controller has the id "${flattenPeerLabel(id)}". Run /peers controllers to see them.`,
         };
       }
+      const forgotten =
+        context.services.peerMessaging?.forgetController(removed.id) ?? 0;
+      const backlog =
+        forgotten === 0
+          ? 'No held messages in this session used that grant.'
+          : `${forgotten} held message${forgotten === 1 ? '' : 's'} from it ${
+              forgotten === 1 ? 'remains' : 'remain'
+            } parked for review as ${
+              forgotten === 1
+                ? 'an ordinary peer message'
+                : 'ordinary peer messages'
+            }.`;
       return {
         type: 'message',
         messageType: 'info',
         content:
           `Revoked the controller "${flattenPeerLabel(removed.label)}" (${removed.id}). ` +
-          'This session and every other one stop accepting its token on the next connection.',
+          `Running sessions revalidate active connections, and new connections can no longer use its token. ${backlog}`,
       };
     }
 
