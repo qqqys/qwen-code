@@ -2698,7 +2698,12 @@ export class StandaloneSessionService {
       request.modelServiceId !== undefined &&
       session.modelApplied === false
     ) {
-      await this.cleanRollbackBeforePersistence(runtime, sessionId);
+      try {
+        await this.cleanRollbackBeforePersistence(runtime, sessionId);
+      } catch (error) {
+        if (!(error instanceof TerminalQuarantineSignal)) throw error;
+        await error.completion.catch(() => {});
+      }
       try {
         await this.options.workspace.discardEmptyConversationDirectory(
           sessionId,

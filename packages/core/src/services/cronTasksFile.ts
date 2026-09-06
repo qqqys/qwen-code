@@ -263,6 +263,12 @@ let updateStaleSeq = 0;
 // cleanup hook at this lifetime.
 const updateMutexes = new Map<string, Mutex>();
 
+// Per-task logical write generations let a scheduler distinguish its own
+// one-shot removal from a later same-task mutation. Keep this separate from
+// file equality: unrelated task writes share the file and must not block a
+// failed dispatch from restoring its schedule.
+const taskMutationGenerations = new Map<string, Map<string, number>>();
+
 function getUpdateMutex(filePath: string): Mutex {
   let mutex = updateMutexes.get(filePath);
   if (!mutex) {
@@ -270,6 +276,24 @@ function getUpdateMutex(filePath: string): Mutex {
     updateMutexes.set(filePath, mutex);
   }
   return mutex;
+}
+
+function advanceTaskMutationGenerations(
+  filePath: string,
+  taskIds: readonly string[],
+): ReadonlyMap<string, number> {
+  let generations = taskMutationGenerations.get(filePath);
+  if (!generations) {
+    generations = new Map();
+    taskMutationGenerations.set(filePath, generations);
+  }
+  const advanced = new Map<string, number>();
+  for (const id of new Set(taskIds)) {
+    const generation = (generations.get(id) ?? 0) + 1;
+    generations.set(id, generation);
+    advanced.set(id, generation);
+  }
+  return advanced;
 }
 
 export function getCronFilePath(projectRoot: string): string {
@@ -416,12 +440,23 @@ async function acquireUpdateLock(
 export async function updateCronTasks(
   projectRoot: string,
   mutate: (tasks: DurableCronTask[]) => DurableCronTask[],
-  options: { assertCanCommit?: () => void } = {},
+  options: {
+    assertCanCommit?: () => void;
+    mutationIds?: readonly string[];
+    onMutationGenerations?: (generations: ReadonlyMap<string, number>) => void;
+  } = {},
 ): Promise<void> {
   const filePath = getCronFilePath(projectRoot);
   return getUpdateMutex(filePath).runExclusive(async () => {
     const release = await acquireUpdateLock(filePath);
     try {
+      if (options.mutationIds?.length) {
+        const generations = advanceTaskMutationGenerations(
+          filePath,
+          options.mutationIds,
+        );
+        options.onMutationGenerations?.(generations);
+      }
       const tasks = await readCronTasks(projectRoot);
       const next = mutate(tasks);
       if (next !== tasks) {

@@ -1752,7 +1752,10 @@ function registerScheduledTaskCrudRoutes(
               rollbackAfter = tasks.filter((_, i) => i !== idx);
               return rollbackAfter;
             },
-            { assertCanCommit: target.assertGenerationOpen },
+            {
+              assertCanCommit: target.assertGenerationOpen,
+              mutationIds: [id],
+            },
           ),
         );
       } catch (err) {
