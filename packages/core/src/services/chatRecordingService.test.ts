@@ -118,6 +118,8 @@ describe('ChatRecordingService', () => {
           .mockReturnValue('/test/project/root/.gemini/projects/test-project'),
       },
       getModel: vi.fn().mockReturnValue('gemini-pro'),
+      getApprovalMode: vi.fn().mockReturnValue(ApprovalMode.DEFAULT),
+      getPrePlanMode: vi.fn().mockReturnValue(ApprovalMode.DEFAULT),
       getFastModel: vi.fn().mockReturnValue(undefined),
       isInteractive: vi.fn().mockReturnValue(false),
       getDebugMode: vi.fn().mockReturnValue(false),
@@ -1304,10 +1306,13 @@ describe('ChatRecordingService', () => {
       chatRecordingService.rewindRecording(0, { truncatedCount: 2 });
       await chatRecordingService.flush();
 
-      expect(jsonl.writeLine).toHaveBeenCalledTimes(1);
+      expect(jsonl.writeLine).toHaveBeenCalledTimes(2);
       const rewind = vi.mocked(jsonl.writeLine).mock.calls[0][1] as ChatRecord;
       expect(rewind.subtype).toBe('rewind');
       expect(rewind.parentUuid).toBe('pre-resume-parent');
+      expect(
+        (vi.mocked(jsonl.writeLine).mock.calls[1][1] as ChatRecord).subtype,
+      ).toBe('session_approval_mode');
     });
 
     it('does not treat a resumed Goal runtime continuation as a rewind boundary', async () => {
@@ -1946,14 +1951,17 @@ describe('ChatRecordingService', () => {
       ]);
       await chatRecordingService.flush();
 
-      expect(jsonl.writeLine).toHaveBeenCalledTimes(3);
+      expect(jsonl.writeLine).toHaveBeenCalledTimes(4);
       const staleSnapshot = vi.mocked(jsonl.writeLine).mock
         .calls[0][1] as ChatRecord;
       const rewind = vi.mocked(jsonl.writeLine).mock.calls[1][1] as ChatRecord;
       const snapshots = vi.mocked(jsonl.writeLine).mock
-        .calls[2][1] as ChatRecord;
+        .calls[3][1] as ChatRecord;
       expect(staleSnapshot.subtype).toBe('file_history_snapshot');
       expect(rewind.subtype).toBe('rewind');
+      expect(
+        (vi.mocked(jsonl.writeLine).mock.calls[2][1] as ChatRecord).subtype,
+      ).toBe('session_approval_mode');
       expect(JSON.parse(JSON.stringify(snapshots.systemPayload))).toEqual({
         snapshots: [
           {
@@ -2750,6 +2758,7 @@ describe('ChatRecordingService', () => {
       expect(written.map((record) => record.subtype)).toEqual([
         'rewind',
         'session_model',
+        'session_approval_mode',
       ]);
       expect(written[1]?.parentUuid).toBe(written[0]?.uuid);
       expect(written[1]?.systemPayload).toEqual({
@@ -2924,11 +2933,14 @@ describe('ChatRecordingService', () => {
       expect(jsonl.writeLine).not.toHaveBeenCalled();
     });
 
-    it('re-anchors the live approval state onto the rewind branch', async () => {
+    it('re-anchors the live config state onto the rewind branch', async () => {
       chatRecordingService.recordUserMessage([{ text: 'first' }]);
       await chatRecordingService.recordSessionApprovalMode({
         mode: ApprovalMode.YOLO,
       });
+      vi.mocked(mockConfig.getApprovalMode).mockReturnValue(
+        ApprovalMode.DEFAULT,
+      );
       chatRecordingService.recordUserMessage([{ text: 'second' }]);
       await chatRecordingService.flush();
       vi.mocked(jsonl.writeLine).mockClear();
@@ -2944,7 +2956,9 @@ describe('ChatRecordingService', () => {
         'session_approval_mode',
       ]);
       expect(written[1]?.parentUuid).toBe(written[0]?.uuid);
-      expect(written[1]?.systemPayload).toEqual({ mode: ApprovalMode.YOLO });
+      expect(written[1]?.systemPayload).toEqual({
+        mode: ApprovalMode.DEFAULT,
+      });
     });
 
     it('re-anchors a pending approval change when rewind lands mid-write', async () => {
@@ -3300,9 +3314,10 @@ describe('ChatRecordingService', () => {
       // Same snapshot bytes — without the rewind reset this would dedup.
       chatRecordingService.recordAttributionSnapshot(baseSnapshot);
       await chatRecordingService.flush();
-      // 1 rewind record + 1 fresh snapshot = 2 more writes after rewind.
+      // Rewind also re-anchors the live approval mode before the fresh
+      // attribution snapshot.
       expect(vi.mocked(jsonl.writeLine).mock.calls.length).toBe(
-        beforeRewind + 2,
+        beforeRewind + 3,
       );
     });
 

@@ -11205,10 +11205,19 @@ class QwenAgent implements Agent {
         const previous = config.getApprovalMode();
         const previousPrePlanMode =
           previous === ApprovalMode.PLAN ? config.getPrePlanMode() : undefined;
+        const previousAutoModeDenialState = {
+          ...config.getAutoModeDenialState(),
+        };
         let transitionRevision: number | undefined;
         try {
           config.setApprovalMode(mode as ApprovalMode);
           transitionRevision = config.getApprovalModeRevision();
+          if (mode === ApprovalMode.PLAN) {
+            if (previous !== ApprovalMode.PLAN) {
+              session.clearActiveTodoPlanRevision();
+            }
+            session.clearTodoStopGuardTrust();
+          }
           await config.waitForSessionApprovalModePersistence?.();
         } catch (err) {
           if (
@@ -11223,6 +11232,7 @@ class QwenAgent implements Agent {
                   ? {}
                   : { prePlanMode: previousPrePlanMode }),
               });
+              config.setAutoModeDenialState(previousAutoModeDenialState);
             } catch (rollbackError) {
               debugLogger.warn(
                 `sessionApprovalMode: rollback failed for session ${sessionId}: ${rollbackError}`,
@@ -11249,12 +11259,7 @@ class QwenAgent implements Agent {
         ) {
           return { previous, current };
         }
-        if (current === 'plan') {
-          if (previous !== 'plan') {
-            session.clearActiveTodoPlanRevision();
-          }
-          session.clearTodoStopGuardTrust();
-        } else if (previous === 'plan') {
+        if (current !== ApprovalMode.PLAN && previous === ApprovalMode.PLAN) {
           session.clearActiveTodoPlanRevision();
         }
         return { previous, current };
@@ -13495,6 +13500,9 @@ class QwenAgent implements Agent {
               previousMode === ApprovalMode.PLAN
                 ? config.getPrePlanMode()
                 : undefined;
+            const previousAutoModeDenialState = {
+              ...config.getAutoModeDenialState(),
+            };
             const convergedMode = this.sessionApprovalModeConverged.get(id);
             if (
               reloadedSessionMode !== undefined &&
@@ -13505,21 +13513,28 @@ class QwenAgent implements Agent {
                 try {
                   config.setApprovalMode(reloadedSessionMode);
                   transitionRevision = config.getApprovalModeRevision();
+                  if (
+                    reloadedSessionMode === ApprovalMode.PLAN &&
+                    previousMode !== ApprovalMode.PLAN
+                  ) {
+                    session.clearActiveTodoPlanRevision();
+                    session.clearTodoStopGuardTrust();
+                  }
                   await config.waitForSessionApprovalModePersistence?.();
                   const transitionStillCurrent =
                     config.getApprovalModeRevision() === transitionRevision;
                   if (transitionStillCurrent) {
-                    if (reloadedSessionMode === 'plan') {
-                      session.clearActiveTodoPlanRevision();
-                      session.clearTodoStopGuardTrust();
-                    } else if (previousMode === 'plan') {
+                    if (
+                      reloadedSessionMode !== ApprovalMode.PLAN &&
+                      previousMode === ApprovalMode.PLAN
+                    ) {
                       session.clearActiveTodoPlanRevision();
                     }
-                    this.sessionApprovalModeConverged.set(
-                      id,
-                      reloadedSessionMode,
-                    );
                   }
+                  this.sessionApprovalModeConverged.set(
+                    id,
+                    reloadedSessionMode,
+                  );
                 } catch (err) {
                   if (
                     transitionRevision !== undefined &&
@@ -13533,6 +13548,9 @@ class QwenAgent implements Agent {
                           ? {}
                           : { prePlanMode: previousPrePlanMode }),
                       });
+                      config.setAutoModeDenialState(
+                        previousAutoModeDenialState,
+                      );
                     } catch (rollbackError) {
                       debugLogger.warn(
                         `reload: approval mode rollback failed for session ${id}: ${rollbackError}`,

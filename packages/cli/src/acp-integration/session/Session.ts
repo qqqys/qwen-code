@@ -10333,8 +10333,17 @@ export class Session implements SessionContext {
       previousApprovalMode === ApprovalMode.PLAN
         ? this.config.getPrePlanMode()
         : undefined;
+    const previousAutoModeDenialState = {
+      ...this.config.getAutoModeDenialState(),
+    };
     this.config.setApprovalMode(approvalMode);
     const transitionRevision = this.config.getApprovalModeRevision();
+    if (approvalMode === ApprovalMode.PLAN) {
+      if (previousApprovalMode !== ApprovalMode.PLAN) {
+        this.clearActiveTodoPlanRevision();
+      }
+      this.clearTodoStopGuardTrust();
+    }
     try {
       await this.config.waitForSessionApprovalModePersistence?.();
     } catch (error) {
@@ -10349,8 +10358,24 @@ export class Session implements SessionContext {
               ? {}
               : { prePlanMode: previousPrePlanMode }),
           });
+          this.config.setAutoModeDenialState(previousAutoModeDenialState);
         } catch (rollbackError) {
           debugLogger.warn('session/set_mode rollback failed', rollbackError);
+        }
+      }
+      const currentApprovalMode = this.config.getApprovalMode();
+      if (currentApprovalMode !== previousApprovalMode) {
+        try {
+          await this.client.extNotification('qwen/notify/session/mode-update', {
+            v: 1,
+            sessionId: this.sessionId,
+            currentModeId: currentApprovalMode,
+          });
+        } catch (notificationError) {
+          debugLogger.debug(
+            'mode-update extNotification failed',
+            notificationError,
+          );
         }
       }
       throw error;
@@ -10366,14 +10391,10 @@ export class Session implements SessionContext {
     // workspaceReload handler; the exit_plan_mode approval path deliberately
     // retains the revision.
     if (
-      previousApprovalMode !== approvalMode &&
-      (previousApprovalMode === ApprovalMode.PLAN ||
-        approvalMode === ApprovalMode.PLAN)
+      previousApprovalMode === ApprovalMode.PLAN &&
+      approvalMode !== ApprovalMode.PLAN
     ) {
       this.clearActiveTodoPlanRevision();
-    }
-    if (approvalMode === ApprovalMode.PLAN) {
-      this.clearTodoStopGuardTrust();
     }
 
     // A2 (#4511): notify attached clients of an in-session mode switch.
@@ -10711,11 +10732,7 @@ export class Session implements SessionContext {
    * Called after the agent switches modes (e.g., from exit_plan_mode tool).
    */
   private async sendCurrentModeUpdateNotification(): Promise<void> {
-    try {
-      await this.config.waitForSessionApprovalModePersistence?.();
-    } catch (error) {
-      debugLogger.debug('approval-mode persistence failed', error);
-    }
+    await this.config.waitForSessionApprovalModePersistence?.();
     const newModeId = this.config.getApprovalMode() as ApprovalModeValue;
     const update: SessionUpdate = {
       sessionUpdate: 'current_mode_update',
@@ -12775,8 +12792,36 @@ export class Session implements SessionContext {
               }
 
               if (shouldSwitchToDefault) {
+                const previousMode = this.config.getApprovalMode();
+                const previousPrePlanMode =
+                  previousMode === ApprovalMode.PLAN
+                    ? this.config.getPrePlanMode()
+                    : undefined;
+                const previousAutoModeDenialState = {
+                  ...this.config.getAutoModeDenialState(),
+                };
                 this.config.setApprovalMode(ApprovalMode.DEFAULT);
-                await this.sendCurrentModeUpdateNotification();
+                try {
+                  await this.sendCurrentModeUpdateNotification();
+                } catch (error) {
+                  try {
+                    this.config.restoreApprovalModeState({
+                      mode: previousMode,
+                      ...(previousPrePlanMode === undefined
+                        ? {}
+                        : { prePlanMode: previousPrePlanMode }),
+                    });
+                  } catch (rollbackError) {
+                    debugLogger.warn(
+                      'confirm-and-switch approval-mode rollback failed',
+                      rollbackError,
+                    );
+                  }
+                  this.config.setAutoModeDenialState(
+                    previousAutoModeDenialState,
+                  );
+                  throw error;
+                }
                 const modeUpdateCancellation =
                   cancelBeforeExecutionIfAborted(toolName);
                 if (modeUpdateCancellation) return modeUpdateCancellation;
@@ -13084,6 +13129,14 @@ export class Session implements SessionContext {
               : undefined;
           let settledArtifacts: ToolArtifact[] | undefined;
           let settledPersistedOutputFiles: string[] | undefined;
+          const preExecutionApprovalMode = this.config.getApprovalMode();
+          const preExecutionPrePlanMode =
+            preExecutionApprovalMode === ApprovalMode.PLAN
+              ? this.config.getPrePlanMode()
+              : undefined;
+          const preExecutionAutoModeDenialState = {
+            ...this.config.getAutoModeDenialState(),
+          };
           const sleepInhibitorHandle = acquireSleepInhibitor(
             this.config,
             `Qwen Code is executing tool ${toolName}`,
@@ -13233,10 +13286,30 @@ export class Session implements SessionContext {
             !toolResult.error &&
             this.config.getApprovalMode() !== approvalMode
           ) {
-            await this.sendCurrentModeUpdateNotification();
             if (this.config.getApprovalMode() === ApprovalMode.PLAN) {
               this.clearActiveTodoPlanRevision();
               this.#clearTodoStopGuardTrustAndDrainAutomaticQueues();
+            }
+            try {
+              await this.sendCurrentModeUpdateNotification();
+            } catch (error) {
+              try {
+                this.config.restoreApprovalModeState({
+                  mode: preExecutionApprovalMode,
+                  ...(preExecutionPrePlanMode === undefined
+                    ? {}
+                    : { prePlanMode: preExecutionPrePlanMode }),
+                });
+              } catch (rollbackError) {
+                debugLogger.warn(
+                  'plan lifecycle approval-mode rollback failed',
+                  rollbackError,
+                );
+              }
+              this.config.setAutoModeDenialState(
+                preExecutionAutoModeDenialState,
+              );
+              throw error;
             }
           }
 

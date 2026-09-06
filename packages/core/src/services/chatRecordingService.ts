@@ -2539,12 +2539,17 @@ export class ChatRecordingService {
         });
       }
 
-      if (this.currentSessionApprovalMode) {
+      const liveSessionApprovalMode = normalizeSessionApprovalModePayload({
+        mode: this.config.getApprovalMode(),
+        prePlanMode: this.config.getPrePlanMode(),
+      });
+      this.currentSessionApprovalMode = liveSessionApprovalMode;
+      if (liveSessionApprovalMode) {
         this.appendRecord({
           ...this.createBaseRecord('system'),
           type: 'system',
           subtype: 'session_approval_mode',
-          systemPayload: this.currentSessionApprovalMode,
+          systemPayload: liveSessionApprovalMode,
         });
       }
 

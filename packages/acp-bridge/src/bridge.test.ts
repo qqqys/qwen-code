@@ -26156,6 +26156,38 @@ describe('createAcpSessionBridge', () => {
       await bridge.shutdown();
     });
 
+    it('does not persist a superseded approval-mode response', async () => {
+      const persistApprovalMode = vi.fn().mockResolvedValue(undefined);
+      const handle = makeChannel({
+        extMethodImpl: async (method) =>
+          method === SERVE_CONTROL_EXT_METHODS.sessionApprovalMode
+            ? {
+                previous: ApprovalMode.DEFAULT,
+                current: ApprovalMode.AUTO_EDIT,
+              }
+            : {},
+      });
+      const bridge = makeBridge({
+        channelFactory: async () => handle.channel,
+        persistApprovalMode,
+      });
+      const session = await bridge.spawnOrAttach({ workspaceCwd: WS_A });
+
+      const result = await bridge.setSessionApprovalMode(
+        session.sessionId,
+        ApprovalMode.YOLO,
+        { persist: true },
+        undefined,
+      );
+
+      expect(result).toMatchObject({
+        mode: ApprovalMode.AUTO_EDIT,
+        persisted: false,
+      });
+      expect(persistApprovalMode).not.toHaveBeenCalled();
+      await bridge.shutdown();
+    });
+
     it('serializes concurrent approval-mode changes through the per-session queue (A3)', async () => {
       // doudouOUC #4484 post-merge review (A3): two concurrent
       // `setSessionApprovalMode` calls must not interleave their ACP

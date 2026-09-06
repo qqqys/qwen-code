@@ -66,6 +66,14 @@ import {
 } from './history-replay-page.js';
 import { createRepeatedToolFailureGuardState } from './repeated-tool-failure-guard.js';
 
+type RunToolCallsForTest = {
+  runToolCalls: (
+    abortSignal: AbortSignal,
+    promptId: string,
+    functionCalls: FunctionCall[],
+  ) => Promise<{ parts: Part[] }>;
+};
+
 const debugLoggerWarnSpy = vi.hoisted(() => vi.fn());
 const debugLoggerDebugSpy = vi.hoisted(() => vi.fn());
 const runVisionBridgeSpy = vi.hoisted(() => vi.fn());
@@ -898,6 +906,13 @@ describe('Session', () => {
       // that care override via `mockConfig.getApprovalMode = vi.fn()...`.
       getApprovalMode: vi.fn().mockReturnValue(ApprovalMode.DEFAULT),
       getPrePlanMode: vi.fn().mockReturnValue(ApprovalMode.DEFAULT),
+      getAutoModeDenialState: vi.fn().mockReturnValue({
+        consecutiveBlock: 0,
+        consecutiveUnavailable: 0,
+        totalBlock: 0,
+        totalUnavailable: 0,
+      }),
+      setAutoModeDenialState: vi.fn(),
       restoreApprovalModeState: vi.fn(),
       getApprovalModeRevision: vi.fn().mockReturnValue(0),
       switchModel: switchModelSpy,
@@ -5800,8 +5815,17 @@ describe('Session', () => {
     it('rolls back and does not report a mode switch when persistence fails', async () => {
       let approvalMode = ApprovalMode.PLAN;
       let prePlanMode = ApprovalMode.AUTO_EDIT;
+      const autoModeDenialState = {
+        consecutiveBlock: 2,
+        consecutiveUnavailable: 1,
+        totalBlock: 4,
+        totalUnavailable: 3,
+      };
       mockConfig.getApprovalMode = vi.fn(() => approvalMode);
       mockConfig.getPrePlanMode = vi.fn(() => prePlanMode);
+      mockConfig.getAutoModeDenialState = vi
+        .fn()
+        .mockReturnValue(autoModeDenialState);
       mockConfig.setApprovalMode = vi.fn((mode: ApprovalMode) => {
         approvalMode = mode;
         if (mode !== ApprovalMode.PLAN) prePlanMode = ApprovalMode.DEFAULT;
@@ -5830,6 +5854,9 @@ describe('Session', () => {
       });
       expect(approvalMode).toBe(ApprovalMode.PLAN);
       expect(prePlanMode).toBe(ApprovalMode.AUTO_EDIT);
+      expect(mockConfig.setAutoModeDenialState).toHaveBeenCalledWith(
+        autoModeDenialState,
+      );
       expect(mockClient.extNotification).not.toHaveBeenCalledWith(
         'qwen/notify/session/mode-update',
         expect.anything(),
@@ -5871,6 +5898,47 @@ describe('Session', () => {
       expect(mockClient.extNotification).toHaveBeenCalledWith(
         'qwen/notify/session/mode-update',
         expect.objectContaining({ currentModeId: 'auto-edit' }),
+      );
+    });
+
+    it('reports the settled mode when overlapping persistence waits fail', async () => {
+      let approvalMode = ApprovalMode.DEFAULT;
+      let revision = 0;
+      let rejectPersistence!: (error: Error) => void;
+      const persistence = new Promise<void>((_resolve, reject) => {
+        rejectPersistence = reject;
+      });
+      mockConfig.getApprovalMode = vi.fn(() => approvalMode);
+      mockConfig.getApprovalModeRevision = vi.fn(() => revision);
+      mockConfig.setApprovalMode = vi.fn((mode: ApprovalMode) => {
+        if (approvalMode !== mode) revision++;
+        approvalMode = mode;
+      });
+      mockConfig.restoreApprovalModeState = vi.fn((payload) => {
+        if (approvalMode !== payload.mode) revision++;
+        approvalMode = payload.mode;
+      });
+      mockConfig.waitForSessionApprovalModePersistence = vi
+        .fn()
+        .mockReturnValueOnce(persistence.then(() => undefined))
+        .mockReturnValueOnce(persistence);
+
+      const first = session.setMode({
+        sessionId: 'test-session-id',
+        modeId: 'yolo',
+      });
+      const second = session.setMode({
+        sessionId: 'test-session-id',
+        modeId: 'auto-edit',
+      });
+      rejectPersistence(new Error('shared persistence failed'));
+
+      await expect(first).rejects.toThrow('shared persistence failed');
+      await expect(second).rejects.toThrow('shared persistence failed');
+      expect(approvalMode).toBe(ApprovalMode.YOLO);
+      expect(mockClient.extNotification).toHaveBeenCalledWith(
+        'qwen/notify/session/mode-update',
+        expect.objectContaining({ currentModeId: ApprovalMode.YOLO }),
       );
     });
 
@@ -5931,6 +5999,49 @@ describe('Session', () => {
         'qwen/notify/session/mode-update',
         expect.objectContaining({ currentModeId: 'yolo' }),
       );
+    });
+
+    it('applies PLAN-entry guards before a superseded persistence wait settles', async () => {
+      let approvalMode = ApprovalMode.DEFAULT;
+      let revision = 0;
+      let releaseFirst!: () => void;
+      const firstPersistence = new Promise<void>((resolve) => {
+        releaseFirst = resolve;
+      });
+      mockConfig.getApprovalMode = vi.fn(() => approvalMode);
+      mockConfig.getApprovalModeRevision = vi.fn(() => revision);
+      mockConfig.setApprovalMode = vi.fn((mode: ApprovalMode) => {
+        if (approvalMode !== mode) revision++;
+        approvalMode = mode;
+      });
+      mockConfig.waitForSessionApprovalModePersistence = vi
+        .fn()
+        .mockReturnValueOnce(firstPersistence)
+        .mockResolvedValueOnce(undefined);
+      const clearActiveTodoPlanRevision = vi.spyOn(
+        session,
+        'clearActiveTodoPlanRevision',
+      );
+      const clearTodoStopGuardTrust = vi.spyOn(
+        session,
+        'clearTodoStopGuardTrust',
+      );
+
+      const enterPlan = session.setMode({
+        sessionId: 'test-session-id',
+        modeId: 'plan',
+      });
+      await Promise.resolve();
+      await session.setMode({
+        sessionId: 'test-session-id',
+        modeId: 'default',
+      });
+      releaseFirst();
+      await enterPlan;
+
+      expect(clearActiveTodoPlanRevision).toHaveBeenCalledTimes(2);
+      expect(clearTodoStopGuardTrust).toHaveBeenCalledOnce();
+      expect(approvalMode).toBe(ApprovalMode.DEFAULT);
     });
 
     it('rejects an unknown modeId and does NOT touch approval mode (A2)', async () => {
@@ -6231,23 +6342,25 @@ describe('Session', () => {
       );
     });
 
-    it('still reports the mode when approval persistence fails', async () => {
+    it('does not report the mode when approval persistence fails', async () => {
       mockConfig.waitForSessionApprovalModePersistence = vi
         .fn()
         .mockRejectedValue(new Error('approval persistence failed'));
 
-      await (
-        session as unknown as {
-          sendCurrentModeUpdateNotification: () => Promise<void>;
-        }
-      ).sendCurrentModeUpdateNotification();
+      await expect(
+        (
+          session as unknown as {
+            sendCurrentModeUpdateNotification: () => Promise<void>;
+          }
+        ).sendCurrentModeUpdateNotification(),
+      ).rejects.toThrow('approval persistence failed');
 
-      expect(mockClient.extNotification).toHaveBeenCalledWith(
+      expect(mockClient.sessionUpdate).not.toHaveBeenCalledWith(
+        expect.objectContaining({ sessionUpdate: 'current_mode_update' }),
+      );
+      expect(mockClient.extNotification).not.toHaveBeenCalledWith(
         'qwen/notify/session/mode-update',
-        expect.objectContaining({
-          currentModeId: ApprovalMode.DEFAULT,
-          legacyFrameSent: true,
-        }),
+        expect.anything(),
       );
     });
   });
@@ -27720,6 +27833,156 @@ describe('Session', () => {
         );
       },
     );
+
+    it('rolls back an enter-plan transition when its persistence fails', async () => {
+      let mode = ApprovalMode.DEFAULT;
+      const executeSpy = vi.fn().mockImplementation(async () => {
+        mode = ApprovalMode.PLAN;
+        return { llmContent: 'entered', returnDisplay: 'entered' };
+      });
+      mockToolRegistry.getTool.mockReturnValue({
+        name: core.ToolNames.ENTER_PLAN_MODE,
+        kind: core.Kind.Think,
+        build: vi.fn().mockReturnValue({
+          params: {},
+          getDefaultPermission: vi.fn().mockResolvedValue('allow'),
+          getConfirmationDetails: vi.fn(),
+          getDescription: vi.fn().mockReturnValue('Enter plan mode'),
+          toolLocations: vi.fn().mockReturnValue([]),
+          execute: executeSpy,
+        }),
+      });
+      mockConfig.getApprovalMode = vi.fn(() => mode);
+      mockConfig.restoreApprovalModeState = vi.fn((payload) => {
+        mode = payload.mode;
+      });
+      mockConfig.getPermissionManager = vi.fn().mockReturnValue(null);
+      mockConfig.getDisableAllHooks = vi.fn().mockReturnValue(true);
+      mockConfig.waitForSessionApprovalModePersistence = vi
+        .fn()
+        .mockResolvedValueOnce(undefined)
+        .mockRejectedValueOnce(new Error('plan snapshot failed'));
+
+      const result = await (
+        session as unknown as RunToolCallsForTest
+      ).runToolCalls(new AbortController().signal, 'prompt-enter-plan', [
+        {
+          id: 'call-enter-plan-persistence',
+          name: core.ToolNames.ENTER_PLAN_MODE,
+          args: {},
+        },
+      ]);
+
+      expect(executeSpy).toHaveBeenCalledOnce();
+      expect(mockConfig.restoreApprovalModeState).toHaveBeenCalledWith({
+        mode: ApprovalMode.DEFAULT,
+      });
+      expect(mode).toBe(ApprovalMode.DEFAULT);
+      expect(mockClient.sessionUpdate).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          update: expect.objectContaining({
+            sessionUpdate: 'current_mode_update',
+          }),
+        }),
+      );
+      expect(result.parts[0]?.functionResponse?.response).toEqual(
+        expect.objectContaining({
+          error: expect.stringContaining('plan snapshot failed'),
+        }),
+      );
+    });
+
+    it('rolls back switch-to-default when its persistence fails', async () => {
+      let mode = ApprovalMode.AUTO;
+      let denialState = {
+        consecutiveBlock: 0,
+        consecutiveUnavailable: 0,
+        totalBlock: 0,
+        totalUnavailable: 0,
+      };
+      const executeSpy = vi.fn().mockResolvedValue({
+        llmContent: 'ok',
+        returnDisplay: 'ok',
+      });
+      mockToolRegistry.getTool.mockReturnValue({
+        name: core.ToolNames.SHELL,
+        kind: core.Kind.Execute,
+        build: vi.fn().mockReturnValue({
+          params: { command: 'pwd' },
+          getDefaultPermission: vi.fn().mockResolvedValue('ask'),
+          getConfirmationDetails: vi.fn().mockResolvedValue({
+            type: 'exec',
+            title: 'Confirm shell command',
+            command: 'pwd',
+            rootCommand: 'pwd',
+            onConfirm: vi.fn().mockResolvedValue(undefined),
+          }),
+          getDescription: vi.fn().mockReturnValue('Run shell command'),
+          toolLocations: vi.fn().mockReturnValue([]),
+          execute: executeSpy,
+        }),
+      });
+      mockConfig.getApprovalMode = vi.fn(() => mode);
+      mockConfig.getCwd = vi.fn().mockReturnValue('/repo');
+      mockConfig.getTargetDir = vi.fn().mockReturnValue('/repo');
+      mockConfig.setApprovalMode = vi.fn((nextMode) => {
+        mode = nextMode;
+      });
+      mockConfig.restoreApprovalModeState = vi.fn((payload) => {
+        mode = payload.mode;
+      });
+      mockConfig.getPermissionManager = vi.fn().mockReturnValue(null);
+      mockConfig.getAutoModeDenialState = vi.fn(() => denialState);
+      mockConfig.setAutoModeDenialState = vi.fn((nextState) => {
+        denialState = nextState;
+      });
+      mockConfig.getAutoModeSettings = vi.fn().mockReturnValue({});
+      mockConfig.getBaseLlmClient = vi.fn().mockReturnValue({
+        generateJson: vi.fn().mockRejectedValue(new Error('classifier down')),
+      });
+      mockConfig.getLlmClient = vi.fn().mockReturnValue({
+        ...mockLlmClient,
+        getHistoryTail: vi.fn().mockReturnValue([]),
+      });
+      mockConfig.getDisableAllHooks = vi.fn().mockReturnValue(true);
+      mockConfig.waitForSessionApprovalModePersistence = vi
+        .fn()
+        .mockRejectedValue(new Error('default snapshot failed'));
+      vi.mocked(mockClient.requestPermission).mockResolvedValueOnce({
+        outcome: {
+          outcome: 'selected',
+          optionId: core.ToolConfirmationOutcome.ProceedOnceAndSwitchToDefault,
+        },
+      });
+
+      const result = await (
+        session as unknown as RunToolCallsForTest
+      ).runToolCalls(new AbortController().signal, 'prompt-switch-default', [
+        {
+          id: 'call-switch-default-persistence',
+          name: core.ToolNames.SHELL,
+          args: { command: 'pwd' },
+        },
+      ]);
+
+      expect(executeSpy).not.toHaveBeenCalled();
+      expect(mockConfig.restoreApprovalModeState).toHaveBeenCalledWith({
+        mode: ApprovalMode.AUTO,
+      });
+      expect(mode).toBe(ApprovalMode.AUTO);
+      expect(mockClient.sessionUpdate).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          update: expect.objectContaining({
+            sessionUpdate: 'current_mode_update',
+          }),
+        }),
+      );
+      expect(result.parts[0]?.functionResponse?.response).toEqual(
+        expect.objectContaining({
+          error: expect.stringContaining('default snapshot failed'),
+        }),
+      );
+    });
 
     it('rechecks a revision-bound plan exit after pre-tool hooks', async () => {
       enableSessionWorkflowRevisionContext();

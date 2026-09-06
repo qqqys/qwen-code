@@ -5815,7 +5815,7 @@ export function createAcpSessionBridge(opts: BridgeOptions): AcpSessionBridge {
         }
 
         let persisted = false;
-        if (persist) {
+        if (persist && response.current === mode) {
           try {
             await withTimeout(
               persistApprovalMode?.(boundWorkspace, mode) ?? Promise.resolve(),

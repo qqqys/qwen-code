@@ -4503,6 +4503,13 @@ describe('QwenAgent MCP SSE/HTTP support', () => {
       getModes: vi.fn().mockReturnValue([]),
       getApprovalMode: vi.fn().mockReturnValue('default'),
       getPrePlanMode: vi.fn().mockReturnValue('default'),
+      getAutoModeDenialState: vi.fn().mockReturnValue({
+        consecutiveBlock: 0,
+        consecutiveUnavailable: 0,
+        totalBlock: 0,
+        totalUnavailable: 0,
+      }),
+      setAutoModeDenialState: vi.fn(),
       getApprovalModeRevision: vi.fn().mockReturnValue(0),
       enableSessionApprovalModePersistence: vi
         .fn()
@@ -5828,6 +5835,12 @@ describe('QwenAgent MCP SSE/HTTP support', () => {
     const innerConfig = await setupSessionMocks(sessionId);
     let approvalMode = 'plan';
     let prePlanMode = 'auto-edit';
+    const autoModeDenialState = {
+      consecutiveBlock: 2,
+      consecutiveUnavailable: 1,
+      totalBlock: 4,
+      totalUnavailable: 3,
+    };
     const persistenceError = new Error('approval persistence failed');
     const setApprovalMode = vi.fn((mode: string) => {
       approvalMode = mode;
@@ -5842,6 +5855,7 @@ describe('QwenAgent MCP SSE/HTTP support', () => {
     Object.assign(innerConfig, {
       getApprovalMode: vi.fn(() => approvalMode),
       getPrePlanMode: vi.fn(() => prePlanMode),
+      getAutoModeDenialState: vi.fn().mockReturnValue(autoModeDenialState),
       setApprovalMode,
       restoreApprovalModeState,
       waitForSessionApprovalModePersistence: vi
@@ -5865,6 +5879,9 @@ describe('QwenAgent MCP SSE/HTTP support', () => {
     });
     expect(approvalMode).toBe('plan');
     expect(prePlanMode).toBe('auto-edit');
+    expect(innerConfig.setAutoModeDenialState).toHaveBeenCalledWith(
+      autoModeDenialState,
+    );
 
     mockConnectionState.resolve();
     await agentPromise;
@@ -27539,6 +27556,13 @@ describe('sessionLanguage multi-session propagation', () => {
       getModes: vi.fn().mockReturnValue([]),
       getApprovalMode: vi.fn().mockReturnValue('default'),
       getPrePlanMode: vi.fn().mockReturnValue('default'),
+      getAutoModeDenialState: vi.fn().mockReturnValue({
+        consecutiveBlock: 0,
+        consecutiveUnavailable: 0,
+        totalBlock: 0,
+        totalUnavailable: 0,
+      }),
+      setAutoModeDenialState: vi.fn(),
       getApprovalModeRevision: vi.fn().mockReturnValue(0),
       restoreApprovalModeState: vi.fn(),
       waitForSessionApprovalModePersistence: vi
@@ -28646,16 +28670,28 @@ describe('sessionLanguage multi-session propagation', () => {
     } as unknown as LoadedSettings;
 
     let approvalMode = 'plan';
+    let approvalModeRevision = 0;
+    let releasePersistence: (() => void) | undefined;
+    let persistenceSuspended = false;
     const setApprovalMode = vi.fn((mode: string) => {
+      if (approvalMode !== mode) approvalModeRevision++;
       approvalMode = mode;
     });
     const cfg = makeConfig({
       getSessionId: vi.fn().mockReturnValue('s-runtime-mode'),
       getApprovalMode: vi.fn(() => approvalMode),
+      getApprovalModeRevision: vi.fn(() => approvalModeRevision),
       setApprovalMode,
       restoreApprovalModeState: vi.fn(({ mode }: { mode: string }) => {
         setApprovalMode(mode);
       }),
+      waitForSessionApprovalModePersistence: vi.fn(() =>
+        persistenceSuspended
+          ? new Promise<void>((resolve) => {
+              releasePersistence = resolve;
+            })
+          : Promise.resolve(),
+      ),
       setDisabledTools: vi.fn(),
       isSessionWorkflowEnabled: vi.fn().mockReturnValue(false),
     });
@@ -28705,7 +28741,14 @@ describe('sessionLanguage multi-session propagation', () => {
     setApprovalMode.mockClear();
     const approvalModes = APPROVAL_MODES as unknown as string[];
     const originalApprovalModes = [...approvalModes];
-    approvalModes.splice(0, approvalModes.length, 'default', 'plan', 'auto');
+    approvalModes.splice(
+      0,
+      approvalModes.length,
+      'default',
+      'plan',
+      'auto',
+      'yolo',
+    );
     try {
       // The initial request applies a session mode before publication while
       // the file still says plan. An unrelated-settings reload must leave it
@@ -28733,11 +28776,29 @@ describe('sessionLanguage multi-session propagation', () => {
 
       // A genuine disk flip must still reach the runtime-diverged session.
       mergedSettings = { tools: { approvalMode: 'auto' } };
-      await agent.extMethod(SERVE_CONTROL_EXT_METHODS.workspaceReload, {});
+      persistenceSuspended = true;
+      const reload = agent.extMethod(
+        SERVE_CONTROL_EXT_METHODS.workspaceReload,
+        {},
+      );
+      await vi.waitFor(() =>
+        expect(setApprovalMode).toHaveBeenCalledWith('auto'),
+      );
+      setApprovalMode('yolo');
+      releasePersistence?.();
+      await reload;
       expect(setApprovalMode).toHaveBeenCalledWith('auto');
-      expect(approvalMode).toBe('auto');
-      expect(clearActiveTodoPlanRevision).toHaveBeenCalledTimes(1);
+      expect(approvalMode).toBe('yolo');
+      expect(clearActiveTodoPlanRevision).not.toHaveBeenCalled();
       expect(clearTodoStopGuardTrust).not.toHaveBeenCalled();
+
+      // The reload still records which file value it observed. Otherwise the
+      // same unchanged file would immediately clobber the newer live choice.
+      persistenceSuspended = false;
+      setApprovalMode.mockClear();
+      await agent.extMethod(SERVE_CONTROL_EXT_METHODS.workspaceReload, {});
+      expect(setApprovalMode).not.toHaveBeenCalled();
+      expect(approvalMode).toBe('yolo');
     } finally {
       approvalModes.splice(0, approvalModes.length, ...originalApprovalModes);
     }
@@ -28886,6 +28947,12 @@ describe('sessionLanguage multi-session propagation', () => {
 
     let approvalMode = 'plan';
     let prePlanMode = 'yolo';
+    const autoModeDenialState = {
+      consecutiveBlock: 2,
+      consecutiveUnavailable: 1,
+      totalBlock: 4,
+      totalUnavailable: 3,
+    };
     const setApprovalMode = vi.fn((mode: string) => {
       approvalMode = mode;
       if (mode !== 'plan') prePlanMode = 'default';
@@ -28904,6 +28971,7 @@ describe('sessionLanguage multi-session propagation', () => {
       getSessionId: vi.fn().mockReturnValue('s-reload-persistence'),
       getApprovalMode: vi.fn(() => approvalMode),
       getPrePlanMode: vi.fn(() => prePlanMode),
+      getAutoModeDenialState: vi.fn().mockReturnValue(autoModeDenialState),
       setApprovalMode,
       restoreApprovalModeState,
       waitForSessionApprovalModePersistence,
@@ -28962,6 +29030,9 @@ describe('sessionLanguage multi-session propagation', () => {
       });
       expect(approvalMode).toBe('plan');
       expect(prePlanMode).toBe('yolo');
+      expect(cfg.setAutoModeDenialState).toHaveBeenCalledWith(
+        autoModeDenialState,
+      );
       expect(clearActiveTodoPlanRevision).not.toHaveBeenCalled();
 
       await agent.extMethod(SERVE_CONTROL_EXT_METHODS.workspaceReload, {});
