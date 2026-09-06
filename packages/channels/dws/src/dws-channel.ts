@@ -1231,8 +1231,9 @@ export class DwsChannel extends PollingChannelBase<DwsCursor> {
         if (this.cursor.processedMessages.includes(key)) continue;
         if (this.hasPendingMessage(key)) continue;
         this.enqueuePendingConversation(message.conversationId);
-        await this.receiveImMessage({ kind: 'at' }, message, true).admitted;
+        await this.admitHistoryMessage({ kind: 'at' }, message);
       }
+      if (signal.aborted || !this.connected) return;
       if (mentions.nextCursor) {
         this.cursor.mentionCheckpoint = {
           ...mentionCheckpoint,
@@ -1279,7 +1280,7 @@ export class DwsChannel extends PollingChannelBase<DwsCursor> {
         // shared retry budget twice per poll.
         if (this.hasPendingMessage(key)) continue;
         this.enqueuePendingConversation(message.conversationId);
-        await this.receiveDirectMessage(message, true).admitted;
+        await this.admitHistoryMessage({ kind: 'direct' }, message);
       }
       if (signal.aborted || !this.connected) return;
       if (this.notificationWatermarkPulledBack) {
@@ -1634,7 +1635,7 @@ export class DwsChannel extends PollingChannelBase<DwsCursor> {
     fromHistory: boolean,
     reportFailure: boolean,
     admissionContext?: ImAdmissionContext,
-  ): Promise<{ completion: Promise<void> }> {
+  ): Promise<{ completion: Promise<void>; remembered: boolean }> {
     const isAmbientSource =
       source.kind === 'group' || source.kind === 'group-all';
     const isCurrentLifecycle =
@@ -1642,11 +1643,11 @@ export class DwsChannel extends PollingChannelBase<DwsCursor> {
       (admissionContext === undefined ||
         admissionContext.generation === this.lifecycleGeneration);
     if (!isCurrentLifecycle && (!admissionContext || !isAmbientSource)) {
-      return { completion: Promise.resolve() };
+      return { completion: Promise.resolve(), remembered: true };
     }
     const key = messageKey(message);
     if (this.markSelfMessageProcessed(message)) {
-      return { completion: Promise.resolve() };
+      return { completion: Promise.resolve(), remembered: true };
     }
     if (
       this.isStaleLiveMessage(
@@ -1658,11 +1659,11 @@ export class DwsChannel extends PollingChannelBase<DwsCursor> {
     ) {
       if (source.kind === 'direct') {
         this.parkStaleDirectMessage(message);
-        return { completion: Promise.resolve() };
+        return { completion: Promise.resolve(), remembered: true };
       }
       this.markProcessedMessage(key);
       this.saveCursor();
-      return { completion: Promise.resolve() };
+      return { completion: Promise.resolve(), remembered: true };
     }
     if (this.shouldFilterImMessage(source, message)) {
       if (source.kind === 'group' || source.kind === 'group-all') {
@@ -1684,17 +1685,34 @@ export class DwsChannel extends PollingChannelBase<DwsCursor> {
         }
       }
       this.removePersistedPendingMessageForSource(key, source);
-      return { completion: Promise.resolve() };
+      return { completion: Promise.resolve(), remembered: true };
     }
     if (!isCurrentLifecycle) {
       if (this.cursor.processedMessages.includes(key)) {
         this.removePersistedPendingMessage(key);
-        return { completion: Promise.resolve() };
+        return { completion: Promise.resolve(), remembered: true };
       }
       this.rememberDrainingPendingMessage(source, message);
-      return { completion: Promise.resolve() };
+      return { completion: Promise.resolve(), remembered: true };
     }
     return this.admitMessage(source, message, key, reportFailure);
+  }
+
+  private async admitHistoryMessage(
+    source: DwsImSource,
+    message: DwsImMessage,
+  ): Promise<void> {
+    const { completion, remembered } = await this.admitReceivedMessage(
+      source,
+      message,
+      true,
+      true,
+    );
+    if (remembered) {
+      void completion.catch(() => undefined);
+      return;
+    }
+    await completion;
   }
 
   private shouldFilterImMessage(
@@ -1713,19 +1731,6 @@ export class DwsChannel extends PollingChannelBase<DwsCursor> {
       (source.kind === 'group' || source.kind === 'group-all') &&
       this.config.groupPolicy === 'pairing' &&
       !this.groupGate.isGroupApproved(message.conversationId)
-    );
-  }
-
-  private receiveDirectMessage(
-    message: DwsImMessage,
-    fromHistory = false,
-    reportFailure = fromHistory,
-  ): DwsImDispatch {
-    return this.receiveImMessage(
-      { kind: 'direct' },
-      message,
-      fromHistory,
-      reportFailure,
     );
   }
 
@@ -1773,32 +1778,34 @@ export class DwsChannel extends PollingChannelBase<DwsCursor> {
     message: DwsImMessage,
     key: string,
     reportFailure: boolean,
-  ): Promise<{ completion: Promise<void> }> {
+  ): Promise<{ completion: Promise<void>; remembered: boolean }> {
     if (this.cursor.processedMessages.includes(key)) {
       this.removePersistedPendingMessage(key);
-      return { completion: Promise.resolve() };
+      return { completion: Promise.resolve(), remembered: true };
     }
     if (!reportFailure) {
       this.enqueuePendingConversation(message.conversationId);
     }
+    let remembered = true;
     if (!this.hasPendingMessage(key)) {
       const dispatchUnparkedAtCapacity =
-        source.kind === 'at' &&
+        (source.kind === 'at' || source.kind === 'direct') &&
         this.connected &&
         (this.cursor.pendingMessages?.length ?? 0) >= MAX_PROCESSED_ITEMS;
-      const remembered = dispatchUnparkedAtCapacity
+      remembered = dispatchUnparkedAtCapacity
         ? false
         : source.kind === 'group' || source.kind === 'group-all'
           ? await this.rememberPendingMessageWhenAvailable(source, message)
           : await this.rememberPendingMessage(source, message);
       if (!remembered) {
         if (!dispatchUnparkedAtCapacity) {
-          return { completion: Promise.resolve() };
+          return { completion: Promise.resolve(), remembered };
         }
       }
     }
     return {
       completion: this.scheduleMessage(source, message, key, reportFailure),
+      remembered,
     };
   }
 
@@ -2200,8 +2207,9 @@ export class DwsChannel extends PollingChannelBase<DwsCursor> {
     try {
       this.saveCursor();
     } catch (error) {
-      this.removePendingMessage(key);
-      throw error;
+      process.stderr.write(
+        `[Channel:${this.name}] could not persist a draining DWS message; keeping it in memory: ${sanitizeLogText(error instanceof Error ? error.message : String(error), 300)}\n`,
+      );
     }
   }
 
@@ -2394,6 +2402,7 @@ export class DwsChannel extends PollingChannelBase<DwsCursor> {
       if (signal.aborted || !this.connected) return;
       const key = messageKey(pending.message);
       if (this.queuedMessages.has(key)) continue;
+      if (this.markSelfMessageProcessed(pending.message)) continue;
       if (this.shouldFilterImMessage(pending.source, pending.message)) {
         if (
           pending.source.kind === 'group' ||

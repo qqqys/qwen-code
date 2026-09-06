@@ -200,6 +200,7 @@ interface BridgeRecoveryOptions {
   scheduler: ChannelLoopScheduler | undefined;
   bridgeReadiness: ReturnType<typeof createBridgeReadinessGate>;
   isShuttingDown: () => boolean;
+  beginShutdown: () => void;
   getBridge: () => AcpBridge;
   setBridge: (bridge: AcpBridge) => void;
 }
@@ -219,6 +220,7 @@ function createBridgeRecovery(options: BridgeRecoveryOptions): {
     scheduler,
     bridgeReadiness,
     isShuttingDown,
+    beginShutdown,
     getBridge,
     setBridge,
   } = options;
@@ -253,6 +255,7 @@ function createBridgeRecovery(options: BridgeRecoveryOptions): {
         const recentCrashCount = crashTimestamps.length;
 
         if (recentCrashCount > MAX_CRASH_RESTARTS) {
+          beginShutdown();
           writeStderrLine(
             `[Channel] Bridge crashed ${recentCrashCount} times in ${CRASH_WINDOW_MS / 1000}s. Giving up.`,
           );
@@ -301,6 +304,8 @@ function createBridgeRecovery(options: BridgeRecoveryOptions): {
       } while (recoveryRequested && !isShuttingDown());
     })()
       .catch(async (err) => {
+        if (isShuttingDown()) return;
+        beginShutdown();
         writeStderrLine(
           `[Channel] Failed to restart bridge: ${err instanceof Error ? err.message : String(err)}`,
         );
@@ -483,6 +488,11 @@ async function startSingle(
     scheduler,
     bridgeReadiness,
     isShuttingDown: () => shuttingDown,
+    beginShutdown: () => {
+      shuttingDown = true;
+      detachShutdownHandlers();
+      shutdownTask ??= Promise.resolve();
+    },
     getBridge: () => bridge,
     setBridge: (next) => {
       bridge = next;
@@ -664,6 +674,11 @@ async function startAll(
     scheduler,
     bridgeReadiness,
     isShuttingDown: () => shuttingDown,
+    beginShutdown: () => {
+      shuttingDown = true;
+      detachShutdownHandlers();
+      shutdownTask ??= Promise.resolve();
+    },
     getBridge: () => bridge,
     setBridge: (next) => {
       bridge = next;

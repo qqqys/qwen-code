@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as os from 'node:os';
+import { CHANNEL_WORKER_KILL_GRACE_MS } from '@qwen-code/acp-bridge/channelControlTimeouts';
 
 const mockCanonicalizeWorkspace = vi.hoisted(() => vi.fn((p: string) => p));
 const mockLoadChannelsConfig = vi.hoisted(() => vi.fn());
@@ -2244,7 +2245,7 @@ describe('runChannelDaemonWorker', () => {
         selection: { mode: 'names', names: ['telegram'] },
         loadDaemonSdk: async () => sdk,
       }).catch((error: unknown) => error);
-      await vi.advanceTimersByTimeAsync(8_000);
+      await vi.advanceTimersByTimeAsync(CHANNEL_WORKER_KILL_GRACE_MS - 1);
 
       expect(await rejection).toEqual(
         expect.objectContaining({ message: 'No channels connected.' }),

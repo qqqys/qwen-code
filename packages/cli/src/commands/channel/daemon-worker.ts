@@ -116,6 +116,7 @@ const SESSION_WORKTREE_PERSISTENCE_FEATURE: ServeFeature =
 const MAX_ACTIVE_WEBHOOK_TASKS = 16;
 const WORKER_CHANNEL_DISCONNECT_DRAIN_MS =
   CHANNEL_WORKER_STOP_GRACE_MS - CHANNEL_WORKER_KILL_GRACE_MS;
+const WORKER_STARTUP_ROLLBACK_DRAIN_MS = 1_500;
 
 async function disconnectWorkerChannels(
   channels: Iterable<ChannelBase>,
@@ -839,7 +840,10 @@ export async function runChannelDaemonWorker(
     };
   } catch (err) {
     scheduler?.stop();
-    await disconnectWorkerChannels(channels.values());
+    await disconnectWorkerChannels(
+      channels.values(),
+      WORKER_STARTUP_ROLLBACK_DRAIN_MS,
+    );
     try {
       bridge.stop();
     } catch {

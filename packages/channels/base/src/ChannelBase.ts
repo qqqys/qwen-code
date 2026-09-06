@@ -6205,6 +6205,7 @@ export abstract class ChannelBase {
         suppressSaveConfirmation: memorySaveIsSideEffect,
       });
       if (!memorySaveIsSideEffect) {
+        this.forgetPendingGroupHistory(envelope);
         return;
       }
     }
@@ -6215,7 +6216,10 @@ export abstract class ChannelBase {
       const handler = this.commands.get(parsed.command);
       if (handler) {
         const handled = await handler(envelope, parsed.args);
-        if (handled) return;
+        if (handled) {
+          this.forgetPendingGroupHistory(envelope);
+          return;
+        }
       }
       // Unrecognized commands fall through to the agent
       // Intercept /btw only where the bridge can answer it out of band. With no
