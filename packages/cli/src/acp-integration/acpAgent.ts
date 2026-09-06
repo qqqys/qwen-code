@@ -845,7 +845,7 @@ function buildAcpLocalReadRoots(config: Config): string[] {
     Storage.getUserWorkflowsDir(),
     // Workflow run artifacts: resume journals, run snapshots, and persisted
     // inline scripts named by workflow results and notifications.
-    path.join(config.storage.getProjectDir(), 'workflows'),
+    config.storage.getWorkflowRunsDir(),
     ...defaultAcpOnlyLocalReadRoots(),
     ...parseAcpLocalReadRootsEnv(),
   ];
@@ -11897,9 +11897,7 @@ class QwenAgent implements Agent {
               : task.status === 'completed' ||
                 task.status === 'failed' ||
                 task.status === 'cancelled';
-          const savedScriptPath = task.workflowName
-            ? task.scriptPath
-            : undefined;
+          const savedScriptPath = task.scriptPath;
           if (!canStart || (!task.script && !savedScriptPath)) {
             return { changed: false, status: task.status };
           }
@@ -11915,15 +11913,33 @@ class QwenAgent implements Agent {
                   `The workflow tool is unavailable; cannot ${action} this run.`,
                 );
               }
+              let readableScriptPath: string | undefined;
+              if (savedScriptPath) {
+                try {
+                  await resolveSavedWorkflowScript(
+                    { scriptPath: savedScriptPath },
+                    config,
+                  );
+                  readableScriptPath = savedScriptPath;
+                } catch {
+                  readableScriptPath = undefined;
+                }
+              }
+              if (!readableScriptPath && !task.script) {
+                return { changed: false, status: task.status };
+              }
               const startParams: Omit<WorkflowParams, 'run_in_background'> = {
-                ...(savedScriptPath
-                  ? { scriptPath: savedScriptPath }
+                ...(readableScriptPath
+                  ? { scriptPath: readableScriptPath }
                   : { script: task.script }),
                 args: task.args,
                 ...(action === 'retry' ? { resumeFromRunId: task.runId } : {}),
               };
               const result = (await workflowTool
-                .buildSessionOwnedBackground(startParams, task.workflowName)
+                .buildSessionOwnedBackground(
+                  startParams,
+                  readableScriptPath ? task.workflowName : undefined,
+                )
                 .execute(new AbortController().signal)) as WorkflowToolResult;
               if (action === 'rerun') {
                 const rerunTask = result.workflowRunId

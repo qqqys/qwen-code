@@ -59,6 +59,7 @@ function makeConfig(overrides: { plansDir?: string } = {}): Config {
     storage: {
       getProjectTempDir: () => layout.projectTempDir,
       getProjectDir: () => layout.projectDir,
+      getWorkflowRunsDir: () => layout.workflowRunsDir,
       getUserSkillsDirs: () => [layout.userSkillsDir],
     },
   } as unknown as Config;
@@ -82,7 +83,7 @@ beforeAll(() => {
     userExtensionsDir: path.join(base, 'runtime', 'extensions'),
     plansDir: path.join(base, 'runtime', 'plans'),
     userWorkflowsDir: path.join(base, 'home', '.qwen', 'workflows'),
-    workflowRunsDir: path.join(base, 'runtime', 'projects', 'p1', 'workflows'),
+    workflowRunsDir: path.join(base, 'runtime', 'workflow-runs-sentinel'),
     memoryBaseDir: path.join(base, 'runtime', 'memory-base'),
     secretsDir: path.join(base, 'secrets'),
     secretFile: path.join(base, 'secrets', 'credentials'),

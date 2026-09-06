@@ -18,7 +18,12 @@ import {
   type WorkflowTask,
 } from '../workflow-run-registry.js';
 import { AgentEventEmitter } from './agent-events.js';
-import { WorkflowJournal, type JournalReplay } from './workflow-journal.js';
+import {
+  deriveAgentKey,
+  deriveArgsSeed,
+  WorkflowJournal,
+  type JournalReplay,
+} from './workflow-journal.js';
 import {
   WorkflowRunner,
   WorkflowScriptNotLaunchedError,
@@ -111,6 +116,7 @@ function stubStorage(config: Config, root: string): void {
     storage: {
       getWorkflowRunJournalPath: (runId: string) =>
         path.join(root, runId, 'journal.jsonl'),
+      getWorkflowRunsDir: () => root,
       getGeneratedWorkflowsDir: () => path.join(root, 'generated'),
       getInlineWorkflowScriptPath: (runId: string) =>
         path.join(root, 'generated', 'inline', `${runId}.js`),
@@ -336,6 +342,40 @@ describe('WorkflowRunner', () => {
     });
   });
 
+  it('replays a readable journal when its advertised path cannot be created', async () => {
+    const { config, registry } = configWithRegistry();
+    stubStorage(config, await makeStorageRoot());
+    const runId = 'wf_1234abcd';
+    const key = deriveAgentKey(deriveArgsSeed(undefined), 'work', {});
+    vi.spyOn(WorkflowJournal.prototype, 'load').mockResolvedValueOnce({
+      results: new Map([
+        [key, { type: 'result', key, agentId: 'agent-1', result: 'cached' }],
+      ]),
+      started: new Map(),
+    });
+    vi.spyOn(WorkflowJournal.prototype, 'ensureExists').mockResolvedValueOnce(
+      false,
+    );
+    const dispatch = vi.fn(async () => 'live');
+
+    const handle = await WorkflowRunner.start({
+      config,
+      signal: new AbortController().signal,
+      script: 'return await agent("work")',
+      args: undefined,
+      resumeFromRunId: runId,
+      dispatch,
+    });
+
+    await expect(handle.completion).resolves.toMatchObject({
+      ok: true,
+      outcome: { result: 'cached' },
+    });
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(handle.journalPath).toBeUndefined();
+    expect(registry.get(runId)?.journalPath).toBeUndefined();
+  });
+
   it('cancels a pending background resume before registration', async () => {
     const { config, registry } = configWithRegistry();
     const runId = 'wf_1234abcd';
@@ -423,6 +463,81 @@ describe('WorkflowRunner', () => {
       fs.access(path.join(root, runId, 'journal.jsonl')),
     ).rejects.toThrow();
   });
+
+  it('restores resume artifacts when cancellation lands before registration', async () => {
+    const { config, registry } = configWithRegistry();
+    const root = await makeStorageRoot();
+    stubStorage(config, root);
+    const initial = await WorkflowRunner.start({
+      config,
+      signal: new AbortController().signal,
+      script: 'return "original"',
+      args: undefined,
+      dispatch: async () => 'unused',
+    });
+    await initial.completion;
+    const journalPath = initial.journalPath!;
+    const scriptPath = initial.scriptPath!;
+    const journalBefore = await fs.readFile(journalPath, 'utf8');
+    let releasePersist: (() => void) | undefined;
+    persistInlineWorkflowScriptMock.mockImplementationOnce(
+      async (_config: Config, runId: string, script: string) => {
+        await new Promise<void>((resolve) => {
+          releasePersist = resolve;
+        });
+        const file = path.join(root, 'generated', 'inline', `${runId}.js`);
+        await fs.writeFile(file, script, 'utf8');
+        return file;
+      },
+    );
+
+    const resume = WorkflowRunner.start({
+      config,
+      signal: new AbortController().signal,
+      script: 'return "never ran"',
+      args: undefined,
+      resumeFromRunId: initial.runId,
+      runInBackground: true,
+      dispatch: async () => 'unused',
+    });
+    await vi.waitFor(() => expect(releasePersist).toBeDefined());
+    expect(registry.cancelStarting(initial.runId)).toBe(true);
+    releasePersist!();
+
+    await expect(resume).rejects.toBeInstanceOf(WorkflowStartCancelledError);
+    await expect(fs.readFile(scriptPath, 'utf8')).resolves.toBe(
+      'return "original"',
+    );
+    await expect(fs.readFile(journalPath, 'utf8')).resolves.toBe(journalBefore);
+  });
+
+  it.each([
+    [true, true, false, true],
+    [true, false, false, false],
+    [true, true, true, false],
+    [false, true, false, false],
+  ])(
+    'records resumeInBackground for background=%s interactive=%s zed=%s',
+    async (background, interactive, zed, expected) => {
+      const { config, registry } = configWithRegistry();
+      Object.assign(config, {
+        isInteractive: () => interactive,
+        getExperimentalZedIntegration: () => zed,
+      });
+
+      const handle = await WorkflowRunner.start({
+        config,
+        signal: new AbortController().signal,
+        script: 'return "done"',
+        args: undefined,
+        runInBackground: background,
+        dispatch: async () => 'unused',
+      });
+      await handle.completion;
+
+      expect(registry.get(handle.runId)?.resumeInBackground).toBe(expected);
+    },
+  );
 
   it('cancels a pending background script load before registration', async () => {
     const { config, registry } = configWithRegistry();

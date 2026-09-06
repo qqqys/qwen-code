@@ -15,6 +15,7 @@ import {
 import {
   getWorkflowTaskMutationKey,
   isTerminalWorkflowStatus,
+  markWorkflowRunPersistenceActive,
   tryWithWorkflowTaskMutation,
   type WorkflowRunRegistry,
   type WorkflowTask,
@@ -176,6 +177,10 @@ export class WorkflowRunner {
     const controller = registry
       ? registry.reserveStart(runId, createController)
       : createController();
+    const releasePersistenceActivity = markWorkflowRunPersistenceActive(
+      config,
+      runId,
+    );
     const assertStartNotCancelled = (): void => {
       if (controller.signal.aborted && !options.signal.aborted) {
         throw new WorkflowStartCancelledError();
@@ -185,10 +190,13 @@ export class WorkflowRunner {
       }
     };
     const storage = config.storage;
+    const previousEntry = registry?.get(runId);
     let journalPath = storage
       ? storage.getWorkflowRunJournalPath(runId)
       : undefined;
-    let journal = journalPath ? new WorkflowJournal(journalPath) : undefined;
+    const journal = journalPath
+      ? new WorkflowJournal(journalPath, storage.getWorkflowRunsDir())
+      : undefined;
     let script: string;
     let scriptPath: string | undefined;
     let resumeReplay: JournalReplay | undefined;
@@ -249,7 +257,6 @@ export class WorkflowRunner {
         persistedInlineScript = persisted !== null;
       }
       if (journal && !(await journal.ensureExists())) {
-        journal = undefined;
         journalPath = undefined;
       }
       assertStartNotCancelled();
@@ -307,9 +314,13 @@ export class WorkflowRunner {
       if (persistedInlineScript && options.resumeFromRunId === undefined) {
         await deleteInlineWorkflowScript(config, runId);
       }
+      if (persistedInlineScript && options.resumeFromRunId && previousEntry) {
+        await persistInlineWorkflowScript(config, runId, previousEntry.script);
+      }
       if (options.resumeFromRunId === undefined) {
         await journal?.remove();
       }
+      releasePersistenceActivity();
       throw error;
     }
     const emitUpdate = (): void => {
@@ -491,6 +502,7 @@ export class WorkflowRunner {
               // Telemetry must not affect workflow execution.
             }
           }
+          releasePersistenceActivity();
           registry?.releaseHandle(runId, handle);
         }
       },

@@ -451,15 +451,17 @@ export async function persistInlineWorkflowScript(
 export async function deleteInlineWorkflowScript(
   config: Config,
   runId: string,
-): Promise<void> {
-  if (!INLINE_RUN_ID_PATTERN.test(runId)) return;
+): Promise<boolean> {
+  if (!INLINE_RUN_ID_PATTERN.test(runId)) return false;
   const storage = config.storage;
-  if (!storage) return;
+  if (!storage) return false;
   try {
     await fs.rm(storage.getInlineWorkflowScriptPath(runId), { force: true });
+    return true;
   } catch (error) {
     debugLogger.warn(
       `failed to delete inline workflow script for ${runId}: ${error}`,
     );
+    return false;
   }
 }

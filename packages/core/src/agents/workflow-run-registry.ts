@@ -45,13 +45,14 @@ import {
   hasUninlinableResumeArgs,
   RESUME_ARGS_TOO_LARGE_NOTE,
 } from './workflow-resume-call.js';
-import { escapeXml } from '../utils/xml.js';
+import { escapeXml, escapeXmlElementText } from '../utils/xml.js';
 import { runOutsideAgentContext } from './runtime/agent-context.js';
 import type { WorkflowDispatchState } from './runtime/workflow-dispatch-scheduler.js';
 
 const debugLogger = createDebugLogger('WORKFLOW_REGISTRY');
 
 const mutatingWorkflowTasks = new Map<string, symbol>();
+const activeWorkflowRunKeys = new Map<string, number>();
 const workflowTaskMutationContext = new AsyncLocalStorage<
   ReadonlyMap<string, symbol>
 >();
@@ -112,6 +113,30 @@ export async function tryWithWorkflowTaskMutation<T>(
       mutatingWorkflowTasks.delete(mutationKey);
     }
   }
+}
+
+export function markWorkflowRunPersistenceActive(
+  config: Config,
+  runId: string,
+): () => void {
+  const key = getWorkflowTaskMutationKey(config, runId);
+  activeWorkflowRunKeys.set(key, (activeWorkflowRunKeys.get(key) ?? 0) + 1);
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    const count = activeWorkflowRunKeys.get(key) ?? 0;
+    if (count <= 1) activeWorkflowRunKeys.delete(key);
+    else activeWorkflowRunKeys.set(key, count - 1);
+  };
+}
+
+export function isWorkflowRunPersistenceActive(
+  config: Config,
+  runId: string,
+): boolean {
+  const key = getWorkflowTaskMutationKey(config, runId);
+  return activeWorkflowRunKeys.has(key) || mutatingWorkflowTasks.has(key);
 }
 
 /**
@@ -604,7 +629,9 @@ export class WorkflowRunRegistry {
         : buildDiagnosticsLines(entry);
     if (recovery.length > 0) {
       const tag = entry.status === 'failed' ? 'recovery' : 'diagnostics';
-      modelParts.push(`<${tag}>${escapeXml(recovery.join('\n'))}</${tag}>`);
+      modelParts.push(
+        `<${tag}>${escapeXmlElementText(recovery.join('\n'))}</${tag}>`,
+      );
     }
     modelParts.push('</task-notification>');
 
@@ -1736,7 +1763,7 @@ function buildUsageLine(entry: WorkflowTask): string {
   );
   return [
     `agents_dispatched=${entry.dispatches.length}`,
-    `agents_completed=${countByStatus('completed')}`,
+    `agents_succeeded=${countByStatus('completed')}`,
     `agents_cached=${countByStatus('cached')}`,
     `agents_failed=${countByStatus('failed')}`,
     `agents_cancelled=${countByStatus('cancelled')}`,
@@ -1750,9 +1777,13 @@ function buildRecoveryLines(entry: WorkflowTask): string[] {
   const lines: string[] = [];
   const resume = buildResumeCall(entry);
   if (resume) {
-    lines.push(
-      `Resume after editing the script: ${resume} — the journal replays the longest unchanged prefix of agent() calls; the first changed call onward runs live.`,
-    );
+    const pathAdvice = entry.workflowName
+      ? `This reads the saved /${entry.workflowName} workflow; copy it before making a run-specific change.`
+      : 'Edit the generated script copy first if the script needs to change.';
+    const journalAdvice = entry.journalPath
+      ? 'The journal replays the longest unchanged prefix of agent() calls; the first changed call onward runs live.'
+      : 'No journal was written for this run, so every agent() call runs live.';
+    lines.push(`Resume: ${resume} — ${pathAdvice} ${journalAdvice}`);
     if (hasUninlinableResumeArgs(entry)) {
       lines.push(RESUME_ARGS_TOO_LARGE_NOTE);
     }
@@ -1773,7 +1804,11 @@ function buildDiagnosticsLines(entry: WorkflowTask): string[] {
   }
   const resume = buildResumeCall(entry);
   if (resume) {
-    lines.push(`Re-run after editing the script: ${resume}`);
+    lines.push(
+      entry.workflowName
+        ? `Re-run the saved /${entry.workflowName} workflow: ${resume}`
+        : `Re-run after editing the generated script: ${resume}`,
+    );
     if (hasUninlinableResumeArgs(entry)) {
       lines.push(RESUME_ARGS_TOO_LARGE_NOTE);
     }

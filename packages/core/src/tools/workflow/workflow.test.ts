@@ -353,6 +353,20 @@ await agent('scan package.json')
       expect(details.permissionRules).toEqual([]);
     });
 
+    it('never pre-approves a persisted inline script path', async () => {
+      const { config, storage } = configWithStorage();
+      const details = (await detailsFor(
+        {
+          scriptPath: storage.getInlineWorkflowScriptPath('wf_1234abcd'),
+          resumeFromRunId: 'wf_1234abcd',
+        },
+        config,
+      )) as { hideAlwaysAllow?: boolean; permissionRules?: string[] };
+
+      expect(details.hideAlwaysAllow).toBe(true);
+      expect(details.permissionRules).toEqual([]);
+    });
+
     it('scopes a saved-workflow grant to the path that was approved', async () => {
       const details = (await detailsFor(
         { scriptPath: '/home/u/.qwen/workflows/audit.js' },
@@ -713,33 +727,41 @@ await agent('scan package.json')
   });
 
   it('starts a session-owned background run outside the interactive TUI', async () => {
+    const runtimeDir = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'workflow-session-owned-'),
+    );
     const registry = new WorkflowRunRegistry();
     registry.setCompletionCallback(vi.fn());
     const config = {
-      storage: new Storage(path.join(os.tmpdir(), 'workflow-session-owned')),
+      storage: new Storage(path.join(runtimeDir, 'project'), runtimeDir),
       isInteractive: () => false,
       getWorkflowRunRegistry: () => registry,
       getSkipWorkflowUsageWarning: () => true,
     } as unknown as Config;
 
-    const result = await new WorkflowTool(config, {
-      dispatch: async () => 'unused',
-    })
-      .buildSessionOwnedBackground(
-        {
-          script: `phase('Inspect'); return { status: 'ready' };`,
-        },
-        'review-and-fix',
-      )
-      .execute(new AbortController().signal);
+    try {
+      const result = await new WorkflowTool(config, {
+        dispatch: async () => 'unused',
+      })
+        .buildSessionOwnedBackground(
+          {
+            script: `phase('Inspect'); return { status: 'ready' };`,
+          },
+          'review-and-fix',
+        )
+        .execute(new AbortController().signal);
 
-    expect(result.workflowRunId).toMatch(/^wf_[0-9a-f]+$/);
-    const run = registry.get(result.workflowRunId!);
-    expect(run?.isBackgrounded).toBe(true);
-    expect(run?.workflowName).toBe('review-and-fix');
-    await vi.waitFor(() =>
-      expect(registry.get(result.workflowRunId!)?.status).toBe('completed'),
-    );
+      expect(result.workflowRunId).toMatch(/^wf_[0-9a-f]+$/);
+      const run = registry.get(result.workflowRunId!);
+      expect(run?.isBackgrounded).toBe(true);
+      expect(run?.workflowName).toBe('review-and-fix');
+      await vi.waitFor(() =>
+        expect(registry.get(result.workflowRunId!)?.status).toBe('completed'),
+      );
+      await registry.getHandle(result.workflowRunId!)?.completion;
+    } finally {
+      await fs.rm(runtimeDir, { recursive: true, force: true });
+    }
   });
 
   it('does not register a background run when the caller is already aborted', async () => {
@@ -992,15 +1014,17 @@ await agent('scan package.json')
 
   it('execute() loads a saved-workflow scriptPath and records its provenance', async () => {
     const projectDir = await fs.mkdtemp(path.join(os.tmpdir(), 'wf-tool-'));
+    const runtimeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'wf-tool-rt-'));
     try {
       const registry = new WorkflowRunRegistry();
+      const storage = new Storage(projectDir, runtimeDir);
       const config = {
         getWorkflowRunRegistry: () => registry,
-        storage: new Storage(projectDir),
+        storage,
       } as unknown as Config;
       // The scriptPath MUST live under a saved-workflow dir (the resolver
       // refuses paths outside it — the #2 path-traversal / symlink guard).
-      const dir = new Storage(projectDir).getProjectWorkflowsDir();
+      const dir = storage.getProjectWorkflowsDir();
       await fs.mkdir(dir, { recursive: true });
       const scriptPath = path.join(dir, 'greet.js');
       await fs.writeFile(scriptPath, 'return await agent("hi");', 'utf8');
@@ -1019,6 +1043,7 @@ await agent('scan package.json')
       expect(entries[0].workflowName).toBe('greet');
     } finally {
       await fs.rm(projectDir, { recursive: true, force: true });
+      await fs.rm(runtimeDir, { recursive: true, force: true });
     }
   });
 
@@ -1793,6 +1818,76 @@ await agent('scan package.json')
       expect(parts[1].text).toContain('logs (last ');
       expect(parts[1].text).toContain('about to fail');
       expect(result.error?.message).toContain('--- workflow run ---');
+    });
+
+    it('does not offer to restart a user-cancelled foreground run', async () => {
+      const { config } = storedConfig();
+      const registry = config.getWorkflowRunRegistry()!;
+      let finishDispatch: ((value: string) => void) | undefined;
+      const execution = new WorkflowTool(config, {
+        dispatch: () =>
+          new Promise<string>((resolve) => {
+            finishDispatch = resolve;
+          }),
+      })
+        .build({ script: 'return await agent("slow");' })
+        .execute(new AbortController().signal);
+      await vi.waitFor(() => expect(registry.list()).toHaveLength(1));
+      const runId = registry.list()[0]!.runId;
+      await vi.waitFor(() =>
+        expect(registry.get(runId)?.dispatches).toHaveLength(1),
+      );
+      registry.cancel(runId, Date.now());
+      finishDispatch?.('late');
+
+      const result = await execution;
+      const text = (result.llmContent as Array<{ text: string }>)
+        .map((part) => part.text)
+        .join('\n');
+      expect(text).toContain('Workflow cancelled');
+      expect(text).toContain('1 cancelled');
+      expect(text).not.toContain('resume: Workflow(');
+      expect(result.error).toBeDefined();
+    });
+
+    it('does not advise editing a saved workflow to resume one run', async () => {
+      const { config, storage } = storedConfig();
+      const scriptPath = path.join(
+        storage.getProjectWorkflowsDir(),
+        'deploy.js',
+      );
+      await fs.mkdir(path.dirname(scriptPath), { recursive: true });
+      await fs.writeFile(scriptPath, 'throw new Error("boom")', 'utf8');
+
+      const result = await new WorkflowTool(config)
+        .build({ scriptPath })
+        .execute(new AbortController().signal);
+      const trailer = (result.llmContent as Array<{ text: string }>)[1].text;
+
+      expect(trailer).toContain('this reads the saved workflow');
+      expect(trailer).not.toContain('edit that file first');
+    });
+
+    it('does not promise replay when the journal path is unavailable', async () => {
+      const { config, storage } = storedConfig();
+      const scriptPath = path.join(
+        storage.getProjectWorkflowsDir(),
+        'deploy.js',
+      );
+      await fs.mkdir(path.dirname(scriptPath), { recursive: true });
+      await fs.writeFile(scriptPath, 'throw new Error("boom")', 'utf8');
+      vi.spyOn(WorkflowJournal.prototype, 'ensureExists').mockResolvedValueOnce(
+        false,
+      );
+
+      const result = await new WorkflowTool(config)
+        .build({ scriptPath })
+        .execute(new AbortController().signal);
+      const trailer = (result.llmContent as Array<{ text: string }>)[1].text;
+
+      expect(trailer).toContain('no journal was written for this run');
+      expect(trailer).not.toContain('longest unchanged prefix');
+      expect(result.journalPath).toBeUndefined();
     });
 
     it('keeps only the bounded tail of failure logs', async () => {

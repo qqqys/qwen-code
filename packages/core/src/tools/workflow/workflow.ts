@@ -221,12 +221,15 @@ const WORKFLOW_PARAM_SCHEMA = {
       type: 'string',
       description:
         'Optional. Resume a prior workflow run by id (e.g. wf_abc123…). ' +
-        'Re-runs the SAME script; agent() calls whose rolling prefix-hash ' +
+        'Re-runs the supplied script or returned script path; agent() calls ' +
+        'whose rolling prefix-hash ' +
         '(prompt + opts, chained in call order) matches a journaled result ' +
         'are served from cache for the longest unchanged prefix, and the ' +
         'first changed/missing call onward runs live. Pass the `scriptPath` ' +
-        'the original run returned (edit that file first when the script has ' +
-        'to change) and the same `args`; the journal keys hash each agent() ' +
+        'the original run returned and the same `args`. Editing a saved ' +
+        'workflow changes future runs too, so copy it for run-specific edits. ' +
+        'Replay requires a journal; without one, every agent() call runs live. ' +
+        'The journal keys hash each agent() ' +
         "call's prompt and opts, not the script text, so post-processing can " +
         'change without losing the cache.',
     },
@@ -338,6 +341,12 @@ class WorkflowToolInvocation extends BaseToolInvocation<
         this.config,
         this.params.scriptPath,
       ));
+    const isGeneratedInlineScriptPath =
+      this.params.scriptPath !== undefined &&
+      (await isWorkflowScriptPathWithinCanonicalRoot(
+        this.params.scriptPath,
+        path.dirname(this.config.storage.getInlineWorkflowScriptPath('wf_0')),
+      ));
     const body = buildConfirmationPrompt(
       this.params,
       meta,
@@ -353,7 +362,8 @@ class WorkflowToolInvocation extends BaseToolInvocation<
       resolveMaxTokensPerWorkflow(),
     );
 
-    const isInlineScript = this.params.script !== undefined;
+    const isInlineScript =
+      this.params.script !== undefined || isGeneratedInlineScriptPath;
     const details: ToolInfoConfirmationDetails = {
       type: 'info',
       title: 'Run a dynamic workflow?',
@@ -521,7 +531,7 @@ class WorkflowToolInvocation extends BaseToolInvocation<
         // one head-only preview when their combined text crosses its limit.
         llmContent: [
           { text: llmText },
-          { text: buildRunTrailer(handle, this.params.args) },
+          { text: buildRunTrailer(this.config, handle, this.params.args) },
         ],
         returnDisplay: usageBanner + '```json\n' + displayJson + '\n```',
       };
@@ -535,11 +545,21 @@ class WorkflowToolInvocation extends BaseToolInvocation<
       // their "Error: <msg>" toString() form.
       const { message, details } = settlement;
       const { phases, logs, meta } = details ?? {};
-      const failureText = `Workflow failed: ${clampForDisplay(
-        sanitizeBlock(message),
-        TRAILER_ERROR_CHARS,
-      )}`;
-      const trailer = buildRunTrailer(handle, this.params.args, logs);
+      const cancelled =
+        handle.registry?.get(handle.runId)?.status === 'cancelled';
+      const failureText = cancelled
+        ? 'Workflow cancelled.'
+        : `Workflow failed: ${clampForDisplay(
+            sanitizeBlock(message),
+            TRAILER_ERROR_CHARS,
+          )}`;
+      const trailer = buildRunTrailer(
+        this.config,
+        handle,
+        this.params.args,
+        logs,
+        !cancelled,
+      );
       // T19 (PR #4732 R1): if the orchestrator preserved phases / logs
       // accumulated before the failure, include them in the display so
       // the user can see what ran before the error.
@@ -559,7 +579,7 @@ class WorkflowToolInvocation extends BaseToolInvocation<
       // successful run. Mitigation: WorkflowTool's failure message
       // already names the error; the banner is meta-documentation
       // about a separate env knob, not run-specific guidance.
-      const display = `Workflow failed: ${message}\n\n${safeStringifyDisplayPayload(
+      const display = `${cancelled ? 'Workflow cancelled.' : `Workflow failed: ${message}`}\n\n${safeStringifyDisplayPayload(
         {
           runId: handle.runId,
           ...(meta ? { meta } : {}),
@@ -617,9 +637,11 @@ const TRAILER_ERROR_CHARS = 4000;
  * no path), so the trailer never names a file that is not there.
  */
 function buildRunTrailer(
+  config: Config,
   handle: WorkflowRunHandle,
   args: unknown,
   logs?: string[],
+  includeResume = true,
 ): string {
   const lines = [
     '--- workflow run ---',
@@ -658,12 +680,16 @@ function buildRunTrailer(
     scriptPath: handle.scriptPath,
     args,
   });
-  if (resume) {
-    lines.push(
-      `resume: ${resume} — edit that file first if the script needs to ` +
-        'change; the journal replays the longest unchanged prefix of ' +
-        'agent() calls, and the first changed call onward runs live.',
-    );
+  if (resume && includeResume) {
+    const pathAdvice =
+      entry?.workflowName ||
+      !isGeneratedWorkflowScriptPath(config, handle.scriptPath!)
+        ? 'this reads the saved workflow; copy it before making a run-specific change'
+        : 'edit that generated copy first if the script needs to change';
+    const journalAdvice = handle.journalPath
+      ? 'the journal replays the longest unchanged prefix of agent() calls, and the first changed call onward runs live'
+      : 'no journal was written for this run, so every agent() call runs live';
+    lines.push(`resume: ${resume} — ${pathAdvice}; ${journalAdvice}.`);
     if (hasUninlinableResumeArgs({ runId: handle.runId, args })) {
       lines.push(RESUME_ARGS_TOO_LARGE_NOTE);
     }
@@ -873,14 +899,21 @@ async function isGeneratedWorkflowScriptPathCanonical(
   config: Config,
   scriptPath: string,
 ): Promise<boolean> {
-  const root = config.storage.getGeneratedWorkflowsDir();
+  return isWorkflowScriptPathWithinCanonicalRoot(
+    scriptPath,
+    config.storage.getGeneratedWorkflowsDir(),
+  );
+}
+
+async function isWorkflowScriptPathWithinCanonicalRoot(
+  scriptPath: string,
+  root: string,
+): Promise<boolean> {
   if (await isSymlinkedRoot(root)) return false;
   let realScriptPath: string;
   try {
     realScriptPath = await fs.realpath(scriptPath);
   } catch {
-    // Nothing loads under a spelling that is not on disk, so classify the
-    // raw string the same way the synchronous surface does.
     return isWithinRoot(scriptPath, root);
   }
   let realRoot: string;

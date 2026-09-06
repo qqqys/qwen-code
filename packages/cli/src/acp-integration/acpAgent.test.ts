@@ -4505,7 +4505,7 @@ describe('QwenAgent MCP SSE/HTTP support', () => {
       '/tmp/qwen-extensions',
       '/home/test/.qwen/plans',
       Storage.getUserWorkflowsDir(),
-      path.join('/project', 'workflows'),
+      '/runtime/workflow-runs-sentinel',
       ...(process.platform === 'win32' ? [] : ['/tmp']),
     ];
   }
@@ -4535,6 +4535,9 @@ describe('QwenAgent MCP SSE/HTTP support', () => {
       storage: {
         getProjectTempDir: vi.fn().mockReturnValue('/project/.qwen/tmp'),
         getProjectDir: vi.fn().mockReturnValue('/project'),
+        getWorkflowRunsDir: vi
+          .fn()
+          .mockReturnValue('/runtime/workflow-runs-sentinel'),
         getUserSkillsDirs: vi.fn().mockReturnValue(['/home/test/.qwen/skills']),
       },
     };
@@ -13779,6 +13782,7 @@ describe('QwenAgent MCP SSE/HTTP support', () => {
       return { llmContent: 'started', workflowRunId: task.runId };
     });
     const buildSessionOwnedBackground = vi.fn().mockReturnValue({ execute });
+    mockResolveSavedWorkflowScript.mockRejectedValueOnce(new Error('ENOENT'));
     Object.assign(innerConfig, {
       getWorkflowRunRegistry: vi.fn().mockReturnValue(registry),
       getToolRegistry: vi.fn().mockReturnValue({
@@ -13811,11 +13815,11 @@ describe('QwenAgent MCP SSE/HTTP support', () => {
     ).resolves.toEqual({ changed: true, status: 'running' });
     expect(buildSessionOwnedBackground).toHaveBeenCalledWith(
       {
-        scriptPath: task.scriptPath,
+        script: task.script,
         args: task.args,
         resumeFromRunId: task.runId,
       },
-      task.workflowName,
+      undefined,
     );
     expect(execute).toHaveBeenCalledOnce();
 
@@ -13838,6 +13842,7 @@ describe('QwenAgent MCP SSE/HTTP support', () => {
       kind: 'workflow' as const,
       status: 'failed' as const,
       script: 'return await agent(args.prompt)',
+      scriptPath: '/runtime/workflows/generated/inline/wf_1234abcd.js',
       args: { prompt: 'retry this path' },
     };
     const registry = {
@@ -13879,6 +13884,14 @@ describe('QwenAgent MCP SSE/HTTP support', () => {
       }),
     ).resolves.toEqual({ changed: false, status: 'failed' });
     expect(execute).toHaveBeenCalledOnce();
+    expect(buildSessionOwnedBackground).toHaveBeenCalledWith(
+      {
+        scriptPath: task.scriptPath,
+        args: task.args,
+        resumeFromRunId: task.runId,
+      },
+      undefined,
+    );
 
     mockConnectionState.resolve();
     await agentPromise;

@@ -17,7 +17,10 @@ import {
   deleteWorkflowSnapshot,
   MAX_RETAINED_SNAPSHOTS,
 } from './workflow-snapshot.js';
-import type { WorkflowTask } from './workflow-run-registry.js';
+import {
+  markWorkflowRunPersistenceActive,
+  type WorkflowTask,
+} from './workflow-run-registry.js';
 
 function fakeConfig(projectDir: string): Config {
   return { storage: new Storage(projectDir) } as unknown as Config;
@@ -328,6 +331,29 @@ describe('writeWorkflowSnapshot + listWorkflowSnapshots', () => {
     await expect(fs.access(path.dirname(journalPath))).resolves.toBeUndefined();
   });
 
+  it('keeps the snapshot when inline script deletion fails', async () => {
+    const config = fakeConfig(projectDir);
+    const runId = 'wf_dead';
+    await writeWorkflowSnapshot(config, task({ runId }));
+    const inlinePath = config.storage.getInlineWorkflowScriptPath(runId);
+    await fs.mkdir(path.dirname(inlinePath), { recursive: true });
+    await fs.writeFile(inlinePath, 'return 1', 'utf8');
+    const rmSpy = vi
+      .spyOn(fs, 'rm')
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(
+        Object.assign(new Error('busy'), { code: 'EBUSY' }),
+      );
+
+    await expect(deleteWorkflowSnapshot(config, runId)).resolves.toBe(false);
+
+    rmSpy.mockRestore();
+    await expect(
+      fs.access(config.storage.getWorkflowRunSnapshotPath(runId)),
+    ).resolves.toBeUndefined();
+    await expect(fs.access(inlinePath)).resolves.toBeUndefined();
+  });
+
   it('rejects traversal-shaped run ids without touching project files', async () => {
     const config = fakeConfig(projectDir);
     // Extensionless on purpose: for input '../CANARY' an unguarded recursive
@@ -444,6 +470,68 @@ describe('writeWorkflowSnapshot + listWorkflowSnapshots', () => {
         config,
         task({ runId: `wf_b${i.toString(16)}`, startTime: 2_000 + i }),
       );
+    }
+
+    await expect(fs.access(snapshotPath)).rejects.toThrow();
+    await expect(fs.access(journalPath)).resolves.toBeUndefined();
+    await expect(fs.access(inlinePath)).resolves.toBeUndefined();
+  });
+
+  it('keeps starting run artifacts while pruning its stale snapshot', async () => {
+    const config = fakeConfig(projectDir);
+    const runId = 'wf_a1';
+    const snapshotPath = config.storage.getWorkflowRunSnapshotPath(runId);
+    const journalPath = config.storage.getWorkflowRunJournalPath(runId);
+    const inlinePath = config.storage.getInlineWorkflowScriptPath(runId);
+    await writeWorkflowSnapshot(config, task({ runId }));
+    await fs.mkdir(path.dirname(journalPath), { recursive: true });
+    await fs.writeFile(journalPath, '{}\n', 'utf8');
+    await fs.mkdir(path.dirname(inlinePath), { recursive: true });
+    await fs.writeFile(inlinePath, 'return 1', 'utf8');
+    await fs.utimes(snapshotPath, new Date(0), new Date(0));
+    Object.assign(config, {
+      getWorkflowRunRegistry: () => ({
+        list: () => [],
+        listStartingRunIds: () => [runId],
+      }),
+    });
+
+    for (let i = 0; i < MAX_RETAINED_SNAPSHOTS; i++) {
+      await writeWorkflowSnapshot(
+        config,
+        task({ runId: `wf_c${i.toString(16)}`, startTime: 3_000 + i }),
+      );
+    }
+
+    await expect(fs.access(snapshotPath)).rejects.toThrow();
+    await expect(fs.access(journalPath)).resolves.toBeUndefined();
+    await expect(fs.access(inlinePath)).resolves.toBeUndefined();
+  });
+
+  it('keeps sibling-session live artifacts while pruning', async () => {
+    const ownerConfig = fakeConfig(projectDir);
+    const pruningConfig = fakeConfig(projectDir);
+    const runId = 'wf_a2';
+    const snapshotPath = ownerConfig.storage.getWorkflowRunSnapshotPath(runId);
+    const journalPath = ownerConfig.storage.getWorkflowRunJournalPath(runId);
+    const inlinePath = ownerConfig.storage.getInlineWorkflowScriptPath(runId);
+    await writeWorkflowSnapshot(ownerConfig, task({ runId }));
+    await fs.mkdir(path.dirname(journalPath), { recursive: true });
+    await fs.writeFile(journalPath, '{}\n', 'utf8');
+    await fs.mkdir(path.dirname(inlinePath), { recursive: true });
+    await fs.writeFile(inlinePath, 'return 1', 'utf8');
+    await fs.utimes(snapshotPath, new Date(0), new Date(0));
+    const release = markWorkflowRunPersistenceActive(ownerConfig, runId);
+
+    try {
+      for (let i = 0; i < MAX_RETAINED_SNAPSHOTS; i++) {
+        await writeWorkflowSnapshot(
+          pruningConfig,
+          task({ runId: `wf_d${i.toString(16)}`, startTime: 4_000 + i }),
+        );
+      }
+    } finally {
+      release();
     }
 
     await expect(fs.access(snapshotPath)).rejects.toThrow();

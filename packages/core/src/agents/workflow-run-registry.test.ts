@@ -2037,13 +2037,13 @@ describe('WorkflowRunRegistry', () => {
 
     const modelText = completion.mock.calls[0][1] as string;
     expect(modelText).toContain(
-      '<usage>agents_dispatched=2 agents_completed=1 agents_cached=0 ' +
+      '<usage>agents_dispatched=2 agents_succeeded=1 agents_cached=0 ' +
         'agents_failed=1 agents_cancelled=0 tokens_spent=4242 duration_ms=2500</usage>',
     );
     expect(modelText).toContain('<recovery>');
     expect(modelText).toContain(
-      'Workflow({ scriptPath: &quot;/runtime/workflows/generated/inline/wf_recover.js&quot;, ' +
-        'resumeFromRunId: &quot;wf_recover&quot;, args: {&quot;plan&quot;:&quot;a&quot;}, run_in_background: true })',
+      'Workflow({ scriptPath: "/runtime/workflows/generated/inline/wf_recover.js", ' +
+        'resumeFromRunId: "wf_recover", args: {"plan":"a"}, run_in_background: true })',
     );
     expect(modelText).toContain(
       'Journal: /runtime/workflows/wf_recover/journal.jsonl',
@@ -2114,7 +2114,7 @@ describe('WorkflowRunRegistry', () => {
     r.fail('wf_bigargs', 'boom', 2_000);
 
     const modelText = completion.mock.calls[0][1] as string;
-    expect(modelText).toContain('resumeFromRunId: &quot;wf_bigargs&quot; })');
+    expect(modelText).toContain('resumeFromRunId: "wf_bigargs" })');
     expect(modelText).not.toContain('args:');
     expect(modelText).toContain('too large to inline here');
   });
@@ -2152,7 +2152,7 @@ describe('WorkflowRunRegistry', () => {
     r.fail(entry.runId, 'boom', 2_000);
 
     expect(completion.mock.calls[0][1]).toContain(
-      'agents_dispatched=1 agents_completed=0 agents_cached=0 agents_failed=0 agents_cancelled=1',
+      'agents_dispatched=1 agents_succeeded=0 agents_cached=0 agents_failed=0 agents_cancelled=1',
     );
   });
 

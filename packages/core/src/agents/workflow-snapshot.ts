@@ -21,6 +21,7 @@ import { deleteInlineWorkflowScript } from './runtime/workflow-saved.js';
 import type { WorkflowMeta } from './runtime/workflow-sandbox.js';
 import {
   isActiveWorkflowStatus,
+  isWorkflowRunPersistenceActive,
   isTerminalWorkflowStatus,
   type WorkflowDispatchTrace,
   type WorkflowEvent,
@@ -208,7 +209,7 @@ export async function deleteWorkflowSnapshot(
     debugLogger.warn(`delete workflow journal failed for ${runId}: ${error}`);
     return false;
   }
-  await deleteInlineWorkflowScript(config, runId);
+  if (!(await deleteInlineWorkflowScript(config, runId))) return false;
   try {
     await fs.unlink(storage.getWorkflowRunSnapshotPath(runId));
   } catch (error) {
@@ -460,7 +461,10 @@ async function pruneSnapshots(config: Config, dir: string): Promise<void> {
       // may drive `fs.rm`. The `.json` unlink stays unconditional — it removes
       // exactly that one file, never a directory.
       const isRunDir = /^wf_[0-9a-f]+$/.test(runId);
-      const deleteArtifacts = isRunDir && !protectedRunIds.has(runId);
+      const deleteArtifacts =
+        isRunDir &&
+        !protectedRunIds.has(runId) &&
+        !isWorkflowRunPersistenceActive(config, runId);
       return Promise.all([
         fs
           .unlink(`${dir}/${s.f}`)

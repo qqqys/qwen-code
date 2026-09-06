@@ -47,13 +47,11 @@ export function getFileReadDefaultPermission(
     config.getPlansDir(),
     // User-scope saved workflows are also named in resume instructions.
     Storage.getUserWorkflowsDir(),
-    // Workflow run artifacts live under <projectDir>/workflows/ (SYNC:
-    // Storage.getWorkflowRunsDir, derived here the same way the subagents
-    // root above is): the resume journal the model is told to read before
+    // Workflow run artifacts: the resume journal the model is told to read before
     // diagnosing a result, the terminal snapshots, and the persisted copy of
     // a script the model wrote itself. Nothing else is written there, and
     // run-artifact paths are named in workflow results and notifications.
-    path.join(config.storage.getProjectDir(), 'workflows'),
+    config.storage.getWorkflowRunsDir(),
   ].map(realpathNearestExisting);
 
   if (
