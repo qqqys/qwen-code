@@ -4281,6 +4281,7 @@ describe('QwenAgent MCP SSE/HTTP support', () => {
       storage: {
         getProjectTempDir: vi.fn().mockReturnValue('/tmp/project'),
         getProjectDir: vi.fn().mockReturnValue('/tmp'),
+        getWorkflowRunsDir: vi.fn().mockReturnValue('/tmp/workflows'),
         getUserSkillsDirs: vi.fn().mockReturnValue([]),
       },
     };
