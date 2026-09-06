@@ -2683,9 +2683,9 @@ export class Session implements SessionContext {
       // `pause` and `finishTurn` both persist through
       // `appendRecordStrict`, which re-throws the latched failure forever.
       // Letting that escape would leave `currentPermit` set and the runtime
-      // `running`, so no continuation is ever scheduled again and every later
-      // prompt hangs in `claimGoalTurn`. Fall back to `releaseTurn`, which is
-      // in-memory only, so the loop survives the already-degraded session.
+      // `running`, so every later prompt hangs in `claimGoalTurn`. Fall back
+      // to the in-memory-only `releaseTurn`; a turn that was meant to pause
+      // must not be requeued when persisting that pause fails.
       try {
         if (
           pauseReason !== undefined &&
@@ -2706,10 +2706,7 @@ export class Session implements SessionContext {
             error instanceof Error ? error.message : String(error)
           }`,
         );
-        if (
-          cancelledByUser ||
-          turn.controller.signal.reason === SESSION_DISPOSE_ABORT_REASON
-        ) {
+        if (pauseReason !== undefined) {
           await runtime.releaseTurn(turn.turnKey, { requeue: false });
         } else {
           await runtime.releaseTurn(turn.turnKey);

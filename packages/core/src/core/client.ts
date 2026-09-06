@@ -30,6 +30,7 @@ import {
 } from '../services/microcompaction/microcompact.js';
 import { slimCompactionInput } from '../services/compactionInputSlimming.js';
 import {
+  GOAL_PAUSE_REASON_SESSION_TOKEN_LIMIT,
   GOAL_PAUSE_REASON_STOP_HOOK_CAP,
   GOAL_PAUSE_REASON_USER_INTERRUPT,
   goalPauseReasonForFailure,
@@ -3484,6 +3485,7 @@ export class LlmClient {
     // early-return) leaves this `false`, and the `finally` block aborts the
     // prefetch as a safety net.
     let normalCompletion = false;
+    let sessionTokenLimitExceeded = false;
     let hasToolCalls = false;
     // Declared outside the try so the finally block can close it out on
     // uncaught-exception exits too; created (when the hook is registered)
@@ -3687,6 +3689,7 @@ export class LlmClient {
         const lastPromptTokenCount =
           this.getChat().getLastPromptTokenCount(requestRouteKey);
         if (lastPromptTokenCount > sessionTokenLimit) {
+          sessionTokenLimitExceeded = true;
           this.cancelPendingMemoryPrefetch('no_safe_delivery_point');
           yield {
             type: LlmEventType.SessionTokenLimitExceeded,
@@ -4911,7 +4914,11 @@ export class LlmClient {
         this.config.endAutomaticActiveTodoWorkChain(prompt_id);
       }
       if (!goalPermitReleased && (callerSignal.aborted || !normalCompletion)) {
-        await releaseGoalPermitOnInterruptedExit();
+        await releaseGoalPermitOnInterruptedExit(
+          sessionTokenLimitExceeded
+            ? GOAL_PAUSE_REASON_SESSION_TOKEN_LIMIT
+            : undefined,
+        );
       }
       closeGoalStateEvents();
       if (pushInitiated) {

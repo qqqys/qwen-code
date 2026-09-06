@@ -24441,7 +24441,7 @@ describe('Session', () => {
         cancelClose?.();
       });
 
-      it('records the model failure that pauses an ACP Goal turn', async () => {
+      it('does not restart a failed Goal when recording its pause fails', async () => {
         const permit: core.GoalTurnPermit = {
           goalId: 'goal-1',
           revision: 1,
@@ -24473,6 +24473,9 @@ describe('Session', () => {
             throw new Error('provider stream failed');
           })(),
         );
+        mockGoalRuntime.dispatch.mockRejectedValueOnce(
+          new Error('write failed'),
+        );
 
         await boundGoalHost!.startGoalTurn({
           permit,
@@ -24487,9 +24490,13 @@ describe('Session', () => {
             reason: goalPauseReasonForFailure('provider stream failed'),
           });
         });
+        expect(mockGoalRuntime.releaseTurn).toHaveBeenCalledWith(turnKey, {
+          requeue: false,
+        });
+        expect(mockChat.sendMessageStream).toHaveBeenCalledOnce();
       });
 
-      it('records the session token limit that pauses an ACP Goal turn before the model request', async () => {
+      it('does not restart a Goal when recording its session-token-limit pause fails', async () => {
         const permit: core.GoalTurnPermit = {
           goalId: 'goal-1',
           revision: 1,
@@ -24521,6 +24528,9 @@ describe('Session', () => {
           newTokenCount: 999,
           compressionStatus: core.CompressionStatus.NOOP,
         });
+        mockGoalRuntime.dispatch.mockRejectedValueOnce(
+          new Error('write failed'),
+        );
 
         await boundGoalHost!.startGoalTurn({
           permit,
@@ -24534,6 +24544,9 @@ describe('Session', () => {
             expectedRevision: permit.revision,
             reason: GOAL_PAUSE_REASON_SESSION_TOKEN_LIMIT,
           });
+        });
+        expect(mockGoalRuntime.releaseTurn).toHaveBeenCalledWith(turnKey, {
+          requeue: false,
         });
         expect(mockChat.sendMessageStream).not.toHaveBeenCalled();
       });

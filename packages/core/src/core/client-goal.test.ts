@@ -15,6 +15,7 @@ import {
 } from '../goals/goal-runtime.js';
 import {
   GOAL_PAUSE_REASON_HEADLESS_RUN_ENDED,
+  GOAL_PAUSE_REASON_SESSION_TOKEN_LIMIT,
   GOAL_PAUSE_REASON_STOP_HOOK_CAP,
   GOAL_PAUSE_REASON_USER_INTERRUPT,
   goalPauseReasonForFailure,
@@ -1911,6 +1912,38 @@ describe('LlmClient Goal admission', () => {
       value:
         'Stop hook blocked continuation 1 consecutive time; overriding and ending the turn.',
     });
+  });
+
+  it('records the session token limit when it stops a Goal before sampling', async () => {
+    const { client, config, runtime } = setupGoalClient();
+    vi.mocked(config.getSessionTokenLimit).mockReturnValue(100);
+    Object.assign(config, {
+      getModelRouteIdentity: vi.fn(() => 'test-route'),
+    });
+    Object.assign(client.getChat(), {
+      getLastPromptTokenCount: vi.fn(() => 101),
+    });
+
+    await drain(
+      client.sendMessageStream(
+        [{ text: 'continue' }],
+        new AbortController().signal,
+        'goal-prompt',
+        {
+          type: SendMessageType.Goal,
+          goalPermit: permit,
+          goalTurnKey: `goal-runtime:${permit.turnId}`,
+        },
+      ),
+    );
+
+    expect(runtime.dispatch).toHaveBeenCalledWith({
+      action: 'pause',
+      expectedGoalId: permit.goalId,
+      expectedRevision: permit.revision,
+      reason: GOAL_PAUSE_REASON_SESSION_TOKEN_LIMIT,
+    });
+    expect(turnMocks.run).not.toHaveBeenCalled();
   });
 
   it('lets the host name a Stop-hook cap pause in its own register', async () => {
