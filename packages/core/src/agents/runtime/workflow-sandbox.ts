@@ -572,6 +572,17 @@ export interface WorkflowOrchestratorEmitter {
    * `WorkflowRunRequest.budget`.
    */
   budgetUpdated?(spent: number, total: number | null): void;
+  /**
+   * A resume ran a journaled call live again. `wasFailed` separates the two
+   * reasons that can happen: the previous run's dispatch settled without a
+   * result (`true`), or the run was interrupted with this agent still in
+   * flight (`false`). `priorAttempts` counts the `started` records behind it.
+   */
+  resumeRespawn?(
+    label: string | undefined,
+    priorAttempts: number,
+    wasFailed: boolean,
+  ): void;
 }
 
 export interface SandboxOptions {
@@ -587,12 +598,15 @@ export interface SandboxOptions {
   runId?: string;
   /**
    * Function called by the script's `agent(prompt, opts)` global. Returns the
-   * agent's final text. Injected so tests can mock without spawning an LLM.
+   * agent's final text, or `null` when that agent failed on its own terms
+   * (turn/time cap, model error, no structured result, the user stopped it) —
+   * the same value a fan-out slot has always carried for a missing agent.
+   * Injected so tests can mock without spawning an LLM.
    */
   dispatch: (
     prompt: string,
     opts: WorkflowAgentOpts,
-  ) => Promise<WorkflowAgentResult>;
+  ) => Promise<WorkflowAgentResult | null>;
   /**
    * Forward-compatibility injection seams for P2 (parallel / pipeline) and
    * P5 (budget). When omitted the sandbox falls back to throwing stubs.

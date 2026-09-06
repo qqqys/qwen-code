@@ -37,6 +37,11 @@
  */
 
 import { AgentEventEmitter, AgentEventType } from './agent-events.js';
+import {
+  WORKFLOW_ABORT_REASON_STALLED,
+  WORKFLOW_ABORT_REASON_USER_SKIP,
+  WorkflowAgentFailedError,
+} from './workflow-agent-failure.js';
 import { createDebugLogger } from '../../utils/debugLogger.js';
 import { parsePositiveIntegerEnv } from '../../utils/env.js';
 
@@ -165,7 +170,7 @@ export function attachStallWatchdog(
         `[Workflow] agent dispatch stalled — no progress for ${stallMs}ms; aborting.`,
       );
       try {
-        controller.abort('stalled');
+        controller.abort(WORKFLOW_ABORT_REASON_STALLED);
       } catch (e) {
         debugLogger.warn('stall watchdog abort threw:', e);
       }
@@ -233,6 +238,12 @@ export interface RunStallResilientOptions {
   signal?: AbortSignal;
   /** For the abandoned-error message. */
   label?: string;
+  /**
+   * Test seam. The per-attempt controller is created here and never escapes,
+   * so a test that needs to abort ONE attempt the way a user action will
+   * (`user-skip`) has no other way to reach it.
+   */
+  controllerFactory?: () => AbortController;
 }
 
 /**
@@ -242,6 +253,13 @@ export interface RunStallResilientOptions {
  * those are deterministic outcomes a retry won't fix. A parent abort
  * propagates without retry.
  *
+ * The one abort this layer classifies itself is `user-skip`: the user stopped
+ * this agent, not the run, so it becomes a `WorkflowAgentFailedError` (the
+ * script reads `null`) rather than a retry or a run-ending throw. It is
+ * decided here because this is where the per-attempt controller lives — the
+ * dispatch below only sees "CANCELLED" and cannot tell a skip from a stall
+ * from a run-wide cancel.
+ *
  * The watchdog is disabled (no retries, raw single attempt) when
  * `stallMs <= 0`.
  */
@@ -249,7 +267,7 @@ export async function runStallResilient<T>(
   attemptFn: StallAttemptFn<T>,
   opts: RunStallResilientOptions,
 ): Promise<T> {
-  const { stallMs, signal, label } = opts;
+  const { stallMs, signal, label, controllerFactory } = opts;
 
   // Watchdog disabled: single raw attempt, parent signal threaded straight
   // through (no per-attempt controller needed).
@@ -261,7 +279,9 @@ export async function runStallResilient<T>(
   let attempt = 0;
   for (;;) {
     attempt += 1;
-    const controller = new AbortController();
+    const controller = controllerFactory
+      ? controllerFactory()
+      : new AbortController();
     // Chain the parent signal so cancellation / wall-clock still aborts the
     // attempt. Named handler so we can detach it after each attempt.
     let onParentAbort: (() => void) | undefined;
@@ -280,6 +300,15 @@ export async function runStallResilient<T>(
     } catch (err) {
       // Parent abort takes priority — never retry a user/wall-clock cancel.
       if (signal?.aborted) throw err;
+      // The user stopped THIS agent. Not a stall (no retry: they asked for it
+      // to end) and not a run failure (the rest of the script is untouched) —
+      // the dispatch layer turns this into `null` for that one call.
+      if (controller.signal.reason === WORKFLOW_ABORT_REASON_USER_SKIP) {
+        throw new WorkflowAgentFailedError(
+          `agent "${label ?? 'workflow-agent'}" was stopped by the user.`,
+          'user_skip',
+        );
+      }
       // A stall manifests as the attempt's "did not complete (CANCELLED)"
       // throw; the watchdog flag is the authoritative signal that WE aborted.
       if (watchdog.stalled() && attempt < MAX_STALL_ATTEMPTS) {

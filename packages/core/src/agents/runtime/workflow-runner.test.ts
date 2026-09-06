@@ -352,6 +352,7 @@ describe('WorkflowRunner', () => {
         [key, { type: 'result', key, agentId: 'agent-1', result: 'cached' }],
       ]),
       started: new Map(),
+      failed: new Set(),
     });
     vi.spyOn(WorkflowJournal.prototype, 'ensureExists').mockResolvedValueOnce(
       false,
@@ -406,7 +407,11 @@ describe('WorkflowRunner', () => {
 
       await vi.waitFor(() => expect(resolveLoad).toBeDefined());
       registry.abortAll();
-      resolveLoad!({ results: new Map(), started: new Map() });
+      resolveLoad!({
+        results: new Map(),
+        started: new Map(),
+        failed: new Set(),
+      });
 
       await expect(start).rejects.toThrow('Workflow start was cancelled.');
       expect(registry.isStarting(runId)).toBe(false);
@@ -415,7 +420,11 @@ describe('WorkflowRunner', () => {
         fs.readdir(path.join(root, 'generated', 'inline')),
       ).rejects.toThrow();
     } finally {
-      resolveLoad?.({ results: new Map(), started: new Map() });
+      resolveLoad?.({
+        results: new Map(),
+        started: new Map(),
+        failed: new Set(),
+      });
       await start.catch(() => undefined);
       loadSpy.mockRestore();
     }

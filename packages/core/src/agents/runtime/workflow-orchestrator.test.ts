@@ -32,6 +32,10 @@ import { ToolConfirmationOutcome } from '../../tools/tools.js';
 import { WorkflowRunRegistry } from '../workflow-run-registry.js';
 import { WorkflowRunner } from './workflow-runner.js';
 import { WorkflowDispatchScheduler } from './workflow-dispatch-scheduler.js';
+import {
+  isWorkflowAgentFailedError,
+  WorkflowAgentFailedError,
+} from './workflow-agent-failure.js';
 
 // FIX-C3 (TST-2-C1): use vi.hoisted so `created` is initialised before the
 // vi.mock factory runs AND remains accessible inside tests for assertion +
@@ -1486,6 +1490,202 @@ describe('WorkflowOrchestrator', () => {
     expect(entries).toHaveLength(0);
   });
 
+  // ── Agent-level failures settle to null ───────────────────────────────
+  //
+  // A sequential `await agent()` used to throw for the same outcome a
+  // `parallel()` slot turned into `null`, so one broken agent ended a
+  // sequential script and merely dented a fan-out. These pin the two shapes
+  // to the same contract, and pin what the journal records either way.
+
+  function memoryJournal(): {
+    journal: import('./workflow-journal.js').WorkflowJournal;
+    entries: Array<import('./workflow-journal.js').JournalEntry>;
+  } {
+    const entries: Array<import('./workflow-journal.js').JournalEntry> = [];
+    const journal = {
+      path: 'mem',
+      append: async (e: import('./workflow-journal.js').JournalEntry) => {
+        entries.push(e);
+      },
+      drain: () => Promise.resolve(),
+    } as unknown as import('./workflow-journal.js').WorkflowJournal;
+    return { journal, entries };
+  }
+
+  it('settles a sequential agent() to null when the agent itself failed', async () => {
+    const { journal, entries } = memoryJournal();
+    const orchestrator = new WorkflowOrchestrator(async () => {
+      throw new WorkflowAgentFailedError(
+        'did not complete (terminate mode: MAX_TURNS).',
+        'max_turns',
+        'MAX_TURNS',
+      );
+    });
+
+    const outcome = await orchestrator.run({
+      script: `const a = await agent('x'); return a === null ? 'saw null' : 'saw ' + a;`,
+      args: undefined,
+      journal,
+    });
+
+    expect(outcome.result).toBe('saw null');
+    // started, then failed — never a result.
+    expect(entries.map((e) => e.type)).toEqual(['started', 'failed']);
+    const started = entries[0] as { key: string; agentId: string };
+    const failed = entries[1] as { key: string; agentId: string };
+    expect(failed.key).toBe(started.key);
+    expect(failed.agentId).toBe(started.agentId);
+  });
+
+  it('gives a parallel() slot the same null, and journals it the same way', async () => {
+    const { journal, entries } = memoryJournal();
+    const orchestrator = new WorkflowOrchestrator(async (prompt) => {
+      if (prompt === 'bad') {
+        throw new WorkflowAgentFailedError('model errored', 'error', 'ERROR');
+      }
+      return `r:${prompt}`;
+    });
+
+    const outcome = await orchestrator.run({
+      script: `return await parallel([() => agent('good'), () => agent('bad')]);`,
+      args: undefined,
+      journal,
+    });
+
+    expect(outcome.result).toEqual(['r:good', null]);
+    expect(entries.filter((e) => e.type === 'failed')).toHaveLength(1);
+    expect(entries.filter((e) => e.type === 'result')).toHaveLength(1);
+  });
+
+  // A run-level failure is still a run failure: the script does not get to
+  // carry on past a budget or cap exhaustion. It is journaled all the same,
+  // because on resume that key genuinely has no result to replay.
+  it('propagates a run-level dispatch failure and still journals it', async () => {
+    const { journal, entries } = memoryJournal();
+    const orchestrator = new WorkflowOrchestrator(async () => {
+      throw new Error('Workflow exceeded the maximum of 1000 agent() calls.');
+    });
+
+    await expect(
+      orchestrator.run({
+        script: `return await agent('x');`,
+        args: undefined,
+        journal,
+      }),
+    ).rejects.toThrow(/maximum of 1000 agent\(\) calls/);
+
+    expect(entries.map((e) => e.type)).toEqual(['started', 'failed']);
+  });
+
+  // The one outcome that is NOT the dispatch's own. Every key open when the
+  // user cancels was merely interrupted, and marking those failed would tell
+  // the next resume the agents are broken when nothing about them is.
+  it('writes no failed record when the run itself was aborted', async () => {
+    const { journal, entries } = memoryJournal();
+    const controller = new AbortController();
+    const orchestrator = new WorkflowOrchestrator(async () => {
+      controller.abort();
+      throw new Error(
+        'Workflow subagent did not complete (terminate mode: CANCELLED).',
+      );
+    });
+
+    await expect(
+      orchestrator.run({
+        script: `return await agent('x');`,
+        args: undefined,
+        journal,
+        abortOnTimeout: controller,
+      }),
+    ).rejects.toThrow();
+
+    expect(entries.filter((e) => e.type === 'failed')).toHaveLength(0);
+    expect(entries.filter((e) => e.type === 'started')).toHaveLength(1);
+  });
+
+  // ── Resume says why a call is running live again ──────────────────────
+
+  it.each([
+    [true, 'failed in the previous run'],
+    [false, 'was interrupted'],
+  ])('reports a respawn with wasFailed=%s', async (wasFailed, _description) => {
+    const { buildReplay } = await import('./workflow-journal.js');
+    const key = (await import('./workflow-journal.js')).deriveAgentKey(
+      (await import('./workflow-journal.js')).deriveArgsSeed(undefined),
+      'x',
+      {},
+    );
+    const priorEntries: Array<import('./workflow-journal.js').JournalEntry> = [
+      { type: 'started', key, agentId: '1' },
+      ...(wasFailed
+        ? ([{ type: 'failed', key, agentId: '1' }] as Array<
+            import('./workflow-journal.js').JournalEntry
+          >)
+        : []),
+    ];
+    const journal = {
+      path: 'mem',
+      append: async () => {},
+      drain: () => Promise.resolve(),
+    } as unknown as import('./workflow-journal.js').WorkflowJournal;
+
+    const respawns: Array<{
+      label: string | undefined;
+      priorAttempts: number;
+      wasFailed: boolean;
+    }> = [];
+    const orchestrator = new WorkflowOrchestrator(async () => 'live');
+    await orchestrator.run({
+      script: `return await agent('x');`,
+      args: undefined,
+      journal,
+      resumeReplay: buildReplay(priorEntries),
+      emitter: {
+        resumeRespawn: (label, priorAttempts, failedBefore) =>
+          respawns.push({ label, priorAttempts, wasFailed: failedBefore }),
+      },
+    });
+
+    expect(respawns).toEqual([
+      { label: undefined, priorAttempts: 1, wasFailed },
+    ]);
+  });
+
+  it('reports no respawn when the journal had a result to replay', async () => {
+    const { buildReplay, deriveAgentKey, deriveArgsSeed } = await import(
+      './workflow-journal.js'
+    );
+    const key = deriveAgentKey(deriveArgsSeed(undefined), 'x', {});
+    const journal = {
+      path: 'mem',
+      append: async () => {},
+      drain: () => Promise.resolve(),
+    } as unknown as import('./workflow-journal.js').WorkflowJournal;
+    const respawns: unknown[] = [];
+    let dispatched = 0;
+
+    const orchestrator = new WorkflowOrchestrator(async () => {
+      dispatched += 1;
+      return 'live';
+    });
+    const outcome = await orchestrator.run({
+      script: `return await agent('x');`,
+      args: undefined,
+      journal,
+      resumeReplay: buildReplay([
+        { type: 'started', key, agentId: '1' },
+        { type: 'result', key, agentId: '1', result: 'cached' },
+      ]),
+      emitter: {
+        resumeRespawn: (...args: unknown[]) => respawns.push(args),
+      },
+    });
+
+    expect(outcome.result).toBe('cached');
+    expect(dispatched).toBe(0);
+    expect(respawns).toHaveLength(0);
+  });
+
   it('assigns journal ids before paused parallel dispatches can dequeue', async () => {
     const entries: Array<import('./workflow-journal.js').JournalEntry> = [];
     const journal = {
@@ -2283,6 +2483,32 @@ describe('createProductionDispatch', () => {
       );
     },
   );
+
+  // The message above is the same for every mode; the CLASS is not, and that
+  // is what decides whether the script sees `null` or the run ends. An agent
+  // that burned its turns or errored out failed on its own; CANCELLED is
+  // ambiguous at this depth (a stall, a user skip and a run abort all land
+  // here), so it stays a plain Error for the stall wrapper to classify.
+  it.each([
+    ['MAX_TURNS', 'max_turns'],
+    ['TIMEOUT', 'timeout'],
+    ['ERROR', 'error'],
+  ])('classifies %s as an agent-level failure', async (mode, kind) => {
+    nextTerminateMode.value = mode;
+    const dispatch = createProductionDispatch(fakeConfig());
+    const caught = await dispatch('hello', { label: 'h1' }).catch((e) => e);
+    expect(isWorkflowAgentFailedError(caught)).toBe(true);
+    expect((caught as WorkflowAgentFailedError).kind).toBe(kind);
+    expect((caught as WorkflowAgentFailedError).terminateMode).toBe(mode);
+  });
+
+  it('leaves CANCELLED unclassified for the stall wrapper', async () => {
+    nextTerminateMode.value = 'CANCELLED';
+    const dispatch = createProductionDispatch(fakeConfig());
+    const caught = await dispatch('hello', { label: 'h1' }).catch((e) => e);
+    expect(caught).toBeInstanceOf(Error);
+    expect(isWorkflowAgentFailedError(caught)).toBe(false);
+  });
 
   // ── R1 (#1 + #3): token reporting across all terminate modes ──────────
 

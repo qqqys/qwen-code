@@ -27,6 +27,10 @@ import type {
   WorkflowOrchestratorEmitter,
 } from './workflow-sandbox.js';
 import { WorkflowBudgetExceededError } from './workflow-budget.js';
+import {
+  isWorkflowAgentFailedError,
+  WorkflowAgentFailedError,
+} from './workflow-agent-failure.js';
 import { resolveStallMs, runStallResilient } from './workflow-stall.js';
 import { deriveAgentKey, deriveArgsSeed } from './workflow-journal.js';
 import type { WorkflowJournal, JournalReplay } from './workflow-journal.js';
@@ -419,6 +423,19 @@ export type WorkflowAgentDispatch = (
   dispatchId?: string,
 ) => Promise<WorkflowAgentResult>;
 
+/**
+ * The script-facing `agent()` — `countedDispatch`, the wrapper the sandbox
+ * actually calls. Wider than the dispatch it wraps by exactly one value:
+ * `null`, for an agent that failed on its own terms. The wrapped dispatch
+ * only ever resolves with a result or throws; deciding that a given throw is
+ * the agent's failure rather than the run's belongs to the wrapper.
+ */
+export type WorkflowCountedDispatch = (
+  prompt: string,
+  opts: WorkflowAgentOpts,
+  dispatchId?: string,
+) => Promise<WorkflowAgentResult | null>;
+
 function generateRunId(): string {
   return `wf_${randomBytes(8).toString('hex')}`;
 }
@@ -649,6 +666,35 @@ function attachDispatchTranscript(
 }
 
 /**
+ * The error for a subagent that ended on anything but GOAL.
+ *
+ * The message is identical for every mode — it is what the operator reads and
+ * what the failures list shows. What differs is the CLASS: MAX_TURNS, TIMEOUT
+ * and ERROR are the agent's own failure, so they carry
+ * `WorkflowAgentFailedError` and the dispatch layer settles the call to
+ * `null`. CANCELLED stays a plain `Error`, because at this depth "cancelled"
+ * is ambiguous — the stall watchdog, a user skip and a run-wide abort all
+ * abort the same attempt signal, and only the stall wrapper (which owns the
+ * watchdog flag and the abort reason) can tell them apart.
+ */
+function terminalDispatchError(
+  workflowAgentId: string,
+  mode: AgentTerminateMode,
+): Error {
+  const message = `Workflow subagent ${workflowAgentId} did not complete (terminate mode: ${mode}).`;
+  switch (mode) {
+    case AgentTerminateMode.MAX_TURNS:
+      return new WorkflowAgentFailedError(message, 'max_turns', mode);
+    case AgentTerminateMode.TIMEOUT:
+      return new WorkflowAgentFailedError(message, 'timeout', mode);
+    case AgentTerminateMode.ERROR:
+      return new WorkflowAgentFailedError(message, 'error', mode);
+    default:
+      return new Error(message);
+  }
+}
+
+/**
  * One single-attempt production dispatch. Receives the per-attempt abort
  * signal (the stall wrapper chains the parent signal into it + the watchdog
  * aborts it on stall) and the per-attempt event emitter (the stall watchdog
@@ -741,9 +787,7 @@ async function runSingleDispatch(
     // would happily loop on empty results.
     const mode = subagent.getTerminateMode();
     if (mode !== AgentTerminateMode.GOAL) {
-      throw new Error(
-        `Workflow subagent ${workflowAgentId} did not complete (terminate mode: ${mode}).`,
-      );
+      throw terminalDispatchError(workflowAgentId, mode);
     }
     return toModelVisibleSubagentResult(subagent.getFinalText(), mode);
   }
@@ -1164,9 +1208,7 @@ async function runOverridePath(
           mode !== AgentTerminateMode.GOAL &&
           mode !== AgentTerminateMode.CANCELLED
         ) {
-          throw new Error(
-            `Workflow subagent ${workflowAgentId} did not complete (terminate mode: ${mode}).`,
-          );
+          throw terminalDispatchError(workflowAgentId, mode);
         }
         // The dispatch aborts via schemaState.abortController on the
         // 3rd validation failure (attempts > 2) AND on success capture.
@@ -1176,24 +1218,28 @@ async function runOverridePath(
         // the messages so an operator sees what actually happened:
         // upstream's verbatim "after 2 in-conversation nudges" wording is
         // factually correct only for (b).
+        //
+        // Both are the agent's own content failure, not the run's: it
+        // answered, just not under the contract. The script sees `null` for
+        // that slot and decides what a missing structured result means.
         if (schemaState.attempts > 2) {
           // Error message verbatim from upstream Claude Code 2.1.168 strings.
-          throw new Error(
+          throw new WorkflowAgentFailedError(
             'subagent completed without calling StructuredOutput (after 2 in-conversation nudges).',
+            'no_structured_output',
           );
         }
-        throw new Error(
+        throw new WorkflowAgentFailedError(
           'subagent completed without calling structured_output ' +
             '(no validation attempt — model produced plain-text content).',
+          'no_structured_output',
         );
       }
 
       // Non-schema mode.
       const mode = subagent.getTerminateMode();
       if (mode !== AgentTerminateMode.GOAL) {
-        throw new Error(
-          `Workflow subagent ${workflowAgentId} did not complete (terminate mode: ${mode}).`,
-        );
+        throw terminalDispatchError(workflowAgentId, mode);
       }
       let finalText: WorkflowAgentResult = toModelVisibleSubagentResult(
         subagent.getFinalText(),
@@ -1704,7 +1750,7 @@ export class WorkflowOrchestrator {
     let hadMiss = false;
     let journalAgentId = 0;
 
-    const countedDispatch: WorkflowAgentDispatch = (prompt, opts) => {
+    const countedDispatch: WorkflowCountedDispatch = (prompt, opts) => {
       // Must run before deriveAgentKey below: hash.update() throws an
       // opaque ERR_INVALID_ARG_TYPE for a non-string prompt, preempting
       // the dispatch's boundary error on the journaled path.
@@ -1765,6 +1811,27 @@ export class WorkflowOrchestrator {
               () => cached.result as WorkflowAgentResult,
               () => cached.result as WorkflowAgentResult,
             );
+          }
+        }
+        // Running live over a key the journal already knows: the previous
+        // run either failed this dispatch or was interrupted with it in
+        // flight. Both re-run, but they are worth telling apart — a failure
+        // is likely to repeat, an interruption is not — so report which one
+        // instead of leaving the operator to infer it from a missing result.
+        const priorStarts = replay?.started.get(journalKey);
+        if (priorStarts && priorStarts.length > 0) {
+          try {
+            emitter?.resumeRespawn?.(
+              typeof opts.label === 'string' ? opts.label : undefined,
+              priorStarts.length,
+              // Optional-chained through `failed` as well: a replay handed in
+              // by an embedder (or an older journal loader) may predate the
+              // set, and a missing diagnostic must not take down the run it
+              // was only ever meant to describe.
+              replay?.failed?.has(journalKey) === true,
+            );
+          } catch (e) {
+            debugLogger.warn('emitter.resumeRespawn threw:', e);
           }
         }
         // First miss → suffix goes live; append a `started` marker so an
@@ -1931,6 +1998,35 @@ export class WorkflowOrchestrator {
               } catch (e) {
                 debugLogger.warn('emitter.budgetUpdated threw:', e);
               }
+            }
+            // Journal the failure so the next resume knows this key ended
+            // without a result rather than merely being interrupted. Both
+            // agent-level failures and run-level ones (budget, cap, stall
+            // exhaustion) are the dispatch's own outcome and are recorded;
+            // a run the user aborted is not — every key open at that moment
+            // was interrupted, and marking those failed would tell the next
+            // resume the agents are broken when nothing about them is.
+            if (journal && journalKey !== undefined && !signal?.aborted) {
+              journal
+                .append({
+                  type: 'failed',
+                  key: journalKey,
+                  agentId: journalEntryId ?? '',
+                })
+                .catch((e) =>
+                  debugLogger.warn(`journal failed-append failed: ${e}`),
+                );
+            }
+            // An agent that failed on its own terms is data, not a run
+            // failure: the script reads `null` and decides. This is the one
+            // place that decision is made — `parallel()`/`pipeline()` slots
+            // reach it through the same dispatch, so a bare `await agent()`
+            // and a fan-out slot now agree on what a broken agent means.
+            if (isWorkflowAgentFailedError(err)) {
+              debugLogger.warn(
+                `[Workflow] agent settled to null (${err.kind}): ${err.message}`,
+              );
+              return null;
             }
             throw err;
           }
