@@ -897,6 +897,8 @@ describe('Session', () => {
       // session.prompt(), so the default must be defined. Individual tests
       // that care override via `mockConfig.getApprovalMode = vi.fn()...`.
       getApprovalMode: vi.fn().mockReturnValue(ApprovalMode.DEFAULT),
+      getPrePlanMode: vi.fn().mockReturnValue(ApprovalMode.DEFAULT),
+      restoreApprovalModeState: vi.fn(),
       getApprovalModeRevision: vi.fn().mockReturnValue(0),
       switchModel: switchModelSpy,
       getModel: vi.fn().mockImplementation(() => currentModel),
@@ -5796,6 +5798,18 @@ describe('Session', () => {
     });
 
     it('rolls back and does not report a mode switch when persistence fails', async () => {
+      let approvalMode = ApprovalMode.PLAN;
+      let prePlanMode = ApprovalMode.AUTO_EDIT;
+      mockConfig.getApprovalMode = vi.fn(() => approvalMode);
+      mockConfig.getPrePlanMode = vi.fn(() => prePlanMode);
+      mockConfig.setApprovalMode = vi.fn((mode: ApprovalMode) => {
+        approvalMode = mode;
+        if (mode !== ApprovalMode.PLAN) prePlanMode = ApprovalMode.DEFAULT;
+      });
+      mockConfig.restoreApprovalModeState = vi.fn((payload) => {
+        approvalMode = payload.mode;
+        prePlanMode = payload.prePlanMode ?? ApprovalMode.DEFAULT;
+      });
       mockConfig.waitForSessionApprovalModePersistence = vi
         .fn()
         .mockRejectedValue(new Error('approval persistence failed'));
@@ -5803,20 +5817,119 @@ describe('Session', () => {
       await expect(
         session.setMode({
           sessionId: 'test-session-id',
-          modeId: 'auto-edit',
+          modeId: 'yolo',
         }),
       ).rejects.toThrow('approval persistence failed');
-      expect(mockConfig.setApprovalMode).toHaveBeenNthCalledWith(
-        1,
-        ApprovalMode.AUTO_EDIT,
+      expect(mockConfig.setApprovalMode).toHaveBeenCalledOnce();
+      expect(mockConfig.setApprovalMode).toHaveBeenCalledWith(
+        ApprovalMode.YOLO,
       );
-      expect(mockConfig.setApprovalMode).toHaveBeenNthCalledWith(
-        2,
-        ApprovalMode.DEFAULT,
-      );
+      expect(mockConfig.restoreApprovalModeState).toHaveBeenCalledWith({
+        mode: ApprovalMode.PLAN,
+        prePlanMode: ApprovalMode.AUTO_EDIT,
+      });
+      expect(approvalMode).toBe(ApprovalMode.PLAN);
+      expect(prePlanMode).toBe(ApprovalMode.AUTO_EDIT);
       expect(mockClient.extNotification).not.toHaveBeenCalledWith(
         'qwen/notify/session/mode-update',
         expect.anything(),
+      );
+    });
+
+    it('does not roll back a later successful mode switch', async () => {
+      let approvalMode = ApprovalMode.DEFAULT;
+      let rejectFirst!: (error: Error) => void;
+      const firstPersistence = new Promise<void>((_resolve, reject) => {
+        rejectFirst = reject;
+      });
+      mockConfig.getApprovalMode = vi.fn(() => approvalMode);
+      mockConfig.setApprovalMode = vi.fn((mode: ApprovalMode) => {
+        approvalMode = mode;
+      });
+      mockConfig.restoreApprovalModeState = vi.fn((payload) => {
+        approvalMode = payload.mode;
+      });
+      mockConfig.waitForSessionApprovalModePersistence = vi
+        .fn()
+        .mockReturnValueOnce(firstPersistence)
+        .mockResolvedValueOnce(undefined);
+
+      const first = session.setMode({
+        sessionId: 'test-session-id',
+        modeId: 'yolo',
+      });
+      void first.catch(() => undefined);
+      await session.setMode({
+        sessionId: 'test-session-id',
+        modeId: 'auto-edit',
+      });
+      rejectFirst(new Error('older persistence failed'));
+
+      await expect(first).rejects.toThrow('older persistence failed');
+      expect(approvalMode).toBe(ApprovalMode.AUTO_EDIT);
+      expect(mockConfig.restoreApprovalModeState).not.toHaveBeenCalled();
+      expect(mockClient.extNotification).toHaveBeenCalledWith(
+        'qwen/notify/session/mode-update',
+        expect.objectContaining({ currentModeId: 'auto-edit' }),
+      );
+    });
+
+    it('does not roll back a later successful same-mode switch', async () => {
+      let approvalMode = ApprovalMode.DEFAULT;
+      let revision = 0;
+      let rejectFirst!: (error: Error) => void;
+      let releaseSecond!: () => void;
+      let releaseThird!: () => void;
+      const firstPersistence = new Promise<void>((_resolve, reject) => {
+        rejectFirst = reject;
+      });
+      const secondPersistence = new Promise<void>((resolve) => {
+        releaseSecond = resolve;
+      });
+      const thirdPersistence = new Promise<void>((resolve) => {
+        releaseThird = resolve;
+      });
+      mockConfig.getApprovalMode = vi.fn(() => approvalMode);
+      mockConfig.getApprovalModeRevision = vi.fn(() => revision);
+      mockConfig.setApprovalMode = vi.fn((mode: ApprovalMode) => {
+        if (approvalMode !== mode) revision++;
+        approvalMode = mode;
+      });
+      mockConfig.restoreApprovalModeState = vi.fn((payload) => {
+        if (approvalMode !== payload.mode) revision++;
+        approvalMode = payload.mode;
+      });
+      mockConfig.waitForSessionApprovalModePersistence = vi
+        .fn()
+        .mockReturnValueOnce(firstPersistence)
+        .mockReturnValueOnce(secondPersistence)
+        .mockReturnValueOnce(thirdPersistence);
+
+      const first = session.setMode({
+        sessionId: 'test-session-id',
+        modeId: 'yolo',
+      });
+      void first.catch(() => undefined);
+      const second = session.setMode({
+        sessionId: 'test-session-id',
+        modeId: 'auto',
+      });
+      const third = session.setMode({
+        sessionId: 'test-session-id',
+        modeId: 'yolo',
+      });
+      releaseThird();
+      await third;
+      releaseSecond();
+      await second;
+      rejectFirst(new Error('older persistence failed'));
+
+      await expect(first).rejects.toThrow('older persistence failed');
+      expect(approvalMode).toBe(ApprovalMode.YOLO);
+      expect(mockConfig.restoreApprovalModeState).not.toHaveBeenCalled();
+      expect(mockClient.extNotification).toHaveBeenLastCalledWith(
+        'qwen/notify/session/mode-update',
+        expect.objectContaining({ currentModeId: 'yolo' }),
       );
     });
 

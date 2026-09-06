@@ -7095,6 +7095,7 @@ export class Config {
       (!this.isTrustedFolder() && prePlanMode !== ApprovalMode.DEFAULT)
         ? ApprovalMode.DEFAULT
         : prePlanMode;
+    this.queueSessionApprovalModePersistence();
   }
 
   getApprovalModeRevision(): number {
@@ -8709,9 +8710,16 @@ export class Config {
       const persisted = await recorder.recordSessionApprovalMode(payload);
       if (!persisted) throw new SessionWriterUnavailableError();
     };
-    this.sessionApprovalModePersistenceTail =
-      this.sessionApprovalModePersistenceTail.then(persist, persist);
-    void this.sessionApprovalModePersistenceTail.catch(() => undefined);
+    const pending = this.sessionApprovalModePersistenceTail.then(
+      persist,
+      persist,
+    );
+    this.sessionApprovalModePersistenceTail = pending;
+    void pending.catch(() => {
+      if (this.sessionApprovalModePersistenceTail === pending) {
+        this.sessionApprovalModePersistenceTail = Promise.resolve();
+      }
+    });
   }
 
   async enableSessionApprovalModePersistence(
@@ -9064,7 +9072,10 @@ export class Config {
     try {
       await this.waitForSessionApprovalModePersistence();
     } catch (error) {
-      failures.push(error);
+      this.debugLogger.warn(
+        'Approval-mode snapshot was not durable before writer close',
+        error,
+      );
     }
     this.chatRecordingService?.beginClose({
       handoff: this.sessionWriterHandoffRequested,

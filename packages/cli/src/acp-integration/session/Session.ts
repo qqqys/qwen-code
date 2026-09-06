@@ -10329,12 +10329,34 @@ export class Session implements SessionContext {
       );
     }
     const previousApprovalMode = this.config.getApprovalMode();
+    const previousPrePlanMode =
+      previousApprovalMode === ApprovalMode.PLAN
+        ? this.config.getPrePlanMode()
+        : undefined;
     this.config.setApprovalMode(approvalMode);
+    const transitionRevision = this.config.getApprovalModeRevision();
     try {
       await this.config.waitForSessionApprovalModePersistence?.();
     } catch (error) {
-      this.config.setApprovalMode(previousApprovalMode);
+      if (
+        this.config.getApprovalMode() === approvalMode &&
+        this.config.getApprovalModeRevision() === transitionRevision
+      ) {
+        try {
+          this.config.restoreApprovalModeState({
+            mode: previousApprovalMode,
+            ...(previousPrePlanMode === undefined
+              ? {}
+              : { prePlanMode: previousPrePlanMode }),
+          });
+        } catch (rollbackError) {
+          debugLogger.warn('session/set_mode rollback failed', rollbackError);
+        }
+      }
       throw error;
+    }
+    if (this.config.getApprovalModeRevision() !== transitionRevision) {
+      return;
     }
     // Only plan-involving transitions touch the revision: entering PLAN starts
     // a fresh approval cycle and leaving PLAN abandons the draft, but an

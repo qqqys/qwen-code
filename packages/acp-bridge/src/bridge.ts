@@ -5417,6 +5417,7 @@ export function createAcpSessionBridge(opts: BridgeOptions): AcpSessionBridge {
           },
         );
       } catch (err) {
+        const normalized = reconstructTrustGateError(err);
         // Only reap when this newSession was the channel's first/only
         // attempt — a populated channel keeps running for its other
         // live sessions. If other work is still using the empty channel,
@@ -5430,10 +5431,10 @@ export function createAcpSessionBridge(opts: BridgeOptions): AcpSessionBridge {
           // finds a target (BkUyD invariant).
           emptyFailureTeardownStarted = true;
           void killChannelWithLog(ci, 'empty newSession failure');
-        } else {
+        } else if (!(normalized instanceof TrustGateError)) {
           ci.emptyReapPending = true;
         }
-        throw reconstructTrustGateError(err);
+        throw normalized;
       }
 
       // Let an already-settled transport failure publish its synchronous

@@ -10839,6 +10839,11 @@ describe('setApprovalMode with folder trust', () => {
         prePlanMode: ApprovalMode.AUTO_EDIT,
       });
       expect(untrusted.getPrePlanMode()).toBe(ApprovalMode.DEFAULT);
+
+      expect(() =>
+        untrusted.restoreApprovalModeState({ mode: ApprovalMode.YOLO }),
+      ).toThrow(TrustGateError);
+      expect(untrusted.getApprovalMode()).toBe(ApprovalMode.PLAN);
     });
 
     it('does not report initialization as a manual plan exit', () => {
@@ -10896,6 +10901,32 @@ describe('setApprovalMode with folder trust', () => {
       expect(assertCanStartTurn).not.toHaveBeenCalled();
     });
 
+    it('persists the restored plan exit target', async () => {
+      const config = new Config(baseParams);
+      vi.spyOn(config, 'isTrustedFolder').mockReturnValue(true);
+      const recordSessionApprovalMode = vi.fn().mockResolvedValue(true);
+      const internal = config as unknown as {
+        chatRecordingService: {
+          recordSessionApprovalMode: typeof recordSessionApprovalMode;
+        };
+        sessionApprovalModePersistenceEnabled: boolean;
+      };
+      internal.chatRecordingService = { recordSessionApprovalMode };
+      internal.sessionApprovalModePersistenceEnabled = true;
+
+      config.restoreApprovalModeState({
+        mode: ApprovalMode.PLAN,
+        prePlanMode: ApprovalMode.AUTO_EDIT,
+      });
+      await config.waitForSessionApprovalModePersistence();
+
+      expect(recordSessionApprovalMode).toHaveBeenCalledTimes(2);
+      expect(recordSessionApprovalMode).toHaveBeenLastCalledWith({
+        mode: ApprovalMode.PLAN,
+        prePlanMode: ApprovalMode.AUTO_EDIT,
+      });
+    });
+
     it('checks recorder health only when the session owns the writer', async () => {
       const config = new Config(baseParams);
       const recorderFailure = new Error('recorder failed');
@@ -10939,7 +10970,7 @@ describe('setApprovalMode with folder trust', () => {
       await config.waitForSessionApprovalModePersistence();
 
       expect(recordSessionApprovalMode).toHaveBeenCalledWith({
-        mode: config.getApprovalMode(),
+        mode: ApprovalMode.AUTO,
       });
     });
 
@@ -10976,6 +11007,30 @@ describe('setApprovalMode with folder trust', () => {
 
       releaseWrite();
       await close;
+      expect(recorder.beginClose).toHaveBeenCalledOnce();
+      expect(recorder.close).toHaveBeenCalledOnce();
+    });
+
+    it('closes the recorder after an approval snapshot failure', async () => {
+      const config = new Config(baseParams);
+      vi.spyOn(config, 'isTrustedFolder').mockReturnValue(true);
+      const recorder = {
+        hasWriteOwnership: vi.fn().mockReturnValue(false),
+        recordSessionApprovalMode: vi.fn().mockResolvedValue(false),
+        assertCanStartTurn: vi.fn().mockResolvedValue(undefined),
+        beginClose: vi.fn(),
+        close: vi.fn().mockResolvedValue(undefined),
+      };
+      const internal = config as unknown as {
+        chatRecordingService: typeof recorder;
+        sessionApprovalModePersistenceEnabled: boolean;
+      };
+      internal.chatRecordingService = recorder;
+      internal.sessionApprovalModePersistenceEnabled = true;
+
+      config.setApprovalMode(ApprovalMode.AUTO_EDIT);
+
+      await expect(config.closeSessionWriter()).resolves.toBeUndefined();
       expect(recorder.beginClose).toHaveBeenCalledOnce();
       expect(recorder.close).toHaveBeenCalledOnce();
     });
@@ -11133,12 +11188,14 @@ describe('setApprovalMode with folder trust', () => {
         chatRecordingService: {
           recordSessionApprovalMode: () => Promise<boolean>;
           assertCanStartTurn: () => Promise<void>;
+          hasWriteOwnership: () => boolean;
         };
         sessionApprovalModePersistenceEnabled: boolean;
       };
       internal.chatRecordingService = {
         recordSessionApprovalMode: vi.fn().mockResolvedValue(false),
         assertCanStartTurn: vi.fn().mockResolvedValue(undefined),
+        hasWriteOwnership: vi.fn().mockReturnValue(false),
       };
       internal.sessionApprovalModePersistenceEnabled = true;
 
@@ -11147,6 +11204,7 @@ describe('setApprovalMode with folder trust', () => {
       await expect(
         config.waitForSessionApprovalModePersistence(),
       ).rejects.toBeInstanceOf(SessionWriterUnavailableError);
+      await expect(config.assertCanStartTurn()).resolves.toBeUndefined();
     });
 
     it('persists a later mode after a recoverable write failure', async () => {

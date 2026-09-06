@@ -11203,11 +11203,32 @@ class QwenAgent implements Agent {
         const session = this.sessionOrThrow(sessionId);
         const config = session.getConfig();
         const previous = config.getApprovalMode();
+        const previousPrePlanMode =
+          previous === ApprovalMode.PLAN ? config.getPrePlanMode() : undefined;
+        let transitionRevision: number | undefined;
         try {
           config.setApprovalMode(mode as ApprovalMode);
+          transitionRevision = config.getApprovalModeRevision();
           await config.waitForSessionApprovalModePersistence?.();
         } catch (err) {
-          config.setApprovalMode(previous);
+          if (
+            transitionRevision !== undefined &&
+            config.getApprovalMode() === mode &&
+            config.getApprovalModeRevision() === transitionRevision
+          ) {
+            try {
+              config.restoreApprovalModeState({
+                mode: previous,
+                ...(previousPrePlanMode === undefined
+                  ? {}
+                  : { prePlanMode: previousPrePlanMode }),
+              });
+            } catch (rollbackError) {
+              debugLogger.warn(
+                `sessionApprovalMode: rollback failed for session ${sessionId}: ${rollbackError}`,
+              );
+            }
+          }
           // `TrustGateError` is the core's structured rejection for
           // untrusted-folder + privileged-mode. We re-raise it as a
           // JSON-RPC error whose `data.errorKind` is the literal the
@@ -11222,6 +11243,12 @@ class QwenAgent implements Agent {
           throw err;
         }
         const current = config.getApprovalMode();
+        if (
+          transitionRevision !== undefined &&
+          config.getApprovalModeRevision() !== transitionRevision
+        ) {
+          return { previous, current };
+        }
         if (current === 'plan') {
           if (previous !== 'plan') {
             session.clearActiveTodoPlanRevision();
@@ -13464,26 +13491,54 @@ class QwenAgent implements Agent {
               ? ApprovalMode.DEFAULT
               : reloadedApprovalMode;
             const previousMode = config.getApprovalMode();
+            const previousPrePlanMode =
+              previousMode === ApprovalMode.PLAN
+                ? config.getPrePlanMode()
+                : undefined;
             const convergedMode = this.sessionApprovalModeConverged.get(id);
             if (
               reloadedSessionMode !== undefined &&
               reloadedSessionMode !== convergedMode
             ) {
               if (reloadedSessionMode !== previousMode) {
+                let transitionRevision: number | undefined;
                 try {
                   config.setApprovalMode(reloadedSessionMode);
+                  transitionRevision = config.getApprovalModeRevision();
                   await config.waitForSessionApprovalModePersistence?.();
-                  if (reloadedSessionMode === 'plan') {
-                    session.clearActiveTodoPlanRevision();
-                    session.clearTodoStopGuardTrust();
-                  } else if (previousMode === 'plan') {
-                    session.clearActiveTodoPlanRevision();
+                  const transitionStillCurrent =
+                    config.getApprovalModeRevision() === transitionRevision;
+                  if (transitionStillCurrent) {
+                    if (reloadedSessionMode === 'plan') {
+                      session.clearActiveTodoPlanRevision();
+                      session.clearTodoStopGuardTrust();
+                    } else if (previousMode === 'plan') {
+                      session.clearActiveTodoPlanRevision();
+                    }
+                    this.sessionApprovalModeConverged.set(
+                      id,
+                      reloadedSessionMode,
+                    );
                   }
-                  this.sessionApprovalModeConverged.set(
-                    id,
-                    reloadedSessionMode,
-                  );
                 } catch (err) {
+                  if (
+                    transitionRevision !== undefined &&
+                    config.getApprovalMode() === reloadedSessionMode &&
+                    config.getApprovalModeRevision() === transitionRevision
+                  ) {
+                    try {
+                      config.restoreApprovalModeState({
+                        mode: previousMode,
+                        ...(previousPrePlanMode === undefined
+                          ? {}
+                          : { prePlanMode: previousPrePlanMode }),
+                      });
+                    } catch (rollbackError) {
+                      debugLogger.warn(
+                        `reload: approval mode rollback failed for session ${id}: ${rollbackError}`,
+                      );
+                    }
+                  }
                   debugLogger.warn(
                     `reload: setApprovalMode failed for session ${id}: ${err}`,
                   );
