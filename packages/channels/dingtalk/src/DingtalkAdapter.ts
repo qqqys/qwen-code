@@ -2573,7 +2573,7 @@ export class DingtalkChannel extends ChannelBase {
       );
     }
 
-    const key = JSON.stringify([sessionId, context.taskId]);
+    const key = JSON.stringify([sessionId, context.taskId, context.turnId]);
     let current = this.backgroundResponseAggregations.get(key);
     let parked = this.pendingBackgroundResponseTerminals.get(key);
     if (current?.turnComplete === true) {
@@ -2585,7 +2585,7 @@ export class DingtalkChannel extends ChannelBase {
       !current &&
       (parked?.turnEnded === true ||
         (parked?.turnComplete === true &&
-          (parked.retryTimer || parked.retryInFlight)))
+          (parked.retryTimer || parked.retryInFlight || parked.resolvers > 0)))
     ) {
       if (!parked.turnEnded) {
         this.detachedPendingBackgroundResponseTerminals.add(parked);

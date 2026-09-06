@@ -8749,6 +8749,81 @@ describe('DingtalkChannel outbound file delivery', () => {
     }
   });
 
+  it('separates the next turn while the completed turn is still resolving', async () => {
+    const channel = createChannel({
+      blockStreaming: 'on',
+      aggregateBackgroundAgentResponses: true,
+    });
+    const target: SessionTarget = {
+      channelName: 'test-dingtalk',
+      senderId: 'user-1',
+      chatId: 'cidGroup==',
+      isGroup: true,
+    };
+    seedSessionTarget(channel, 'session-1', target);
+    const resolutionGate = deferredPromise<
+      { target: SessionTarget } | undefined
+    >();
+    vi.spyOn(
+      channel as unknown as {
+        resolveBackgroundResponseDelivery(
+          sessionId: string,
+        ): Promise<{ target: SessionTarget } | undefined>;
+      },
+      'resolveBackgroundResponseDelivery',
+    )
+      .mockReturnValueOnce(resolutionGate.promise)
+      .mockResolvedValue({ target });
+    const pushProactive = vi
+      .spyOn(
+        channel as unknown as {
+          pushProactive(target: SessionTarget, text: string): Promise<void>;
+        },
+        'pushProactive',
+      )
+      .mockResolvedValue(undefined);
+
+    const first = channel.dispatchBackgroundResponse(
+      'session-1',
+      'Turn one result.',
+      {
+        taskId: 'agent-1',
+        status: 'running',
+        kind: 'agent',
+        turnComplete: false,
+        label: 'Worker one',
+      },
+    );
+    await channel.dispatchBackgroundResponse('session-1', '', {
+      taskId: 'agent-1',
+      status: 'completed',
+      kind: 'agent',
+      turnComplete: true,
+      label: 'Worker one',
+    });
+    await channel.dispatchBackgroundResponse('session-1', 'Turn two result.', {
+      taskId: 'agent-1',
+      status: 'running',
+      kind: 'agent',
+      turnComplete: false,
+      label: 'Worker two',
+    });
+    resolutionGate.resolve({ target });
+    await first;
+    await channel.dispatchBackgroundResponse('session-1', '', {
+      taskId: 'agent-1',
+      status: 'completed',
+      kind: 'agent',
+      turnComplete: true,
+      label: 'Worker two',
+    });
+
+    expect(pushProactive.mock.calls.map((call) => call[1])).toEqual([
+      '## ✅ Agent · Worker one\n\nTurn one result.',
+      '## ✅ Agent · Worker two\n\nTurn two result.',
+    ]);
+  });
+
   it('preserves a text-bearing terminal while a resolution retry is armed', async () => {
     vi.useFakeTimers();
     try {
@@ -9036,6 +9111,86 @@ describe('DingtalkChannel outbound file delivery', () => {
         turnComplete: true,
         label: 'Worker two',
       });
+      expect(pushProactive.mock.calls.map((call) => call[1])).toEqual([
+        '## ✅ Agent · Worker two\n\nNext turn result.',
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('retries delivery independently after a turn exhausts resolution', async () => {
+    vi.useFakeTimers();
+    try {
+      const channel = createChannel({
+        blockStreaming: 'on',
+        aggregateBackgroundAgentResponses: true,
+      });
+      const target: SessionTarget = {
+        channelName: 'test-dingtalk',
+        senderId: 'user-1',
+        chatId: 'cidGroup==',
+        isGroup: true,
+      };
+      seedSessionTarget(channel, 'session-1', target);
+      const resolveDelivery = vi.spyOn(
+        channel as unknown as {
+          resolveBackgroundResponseDelivery(
+            sessionId: string,
+          ): Promise<{ target: SessionTarget } | undefined>;
+        },
+        'resolveBackgroundResponseDelivery',
+      );
+      resolveDelivery
+        .mockRejectedValueOnce(new Error('owner unavailable'))
+        .mockRejectedValueOnce(new Error('owner unavailable'))
+        .mockRejectedValueOnce(new Error('owner unavailable'))
+        .mockRejectedValueOnce(new Error('owner unavailable'))
+        .mockResolvedValue({ target });
+      const pushProactive = vi
+        .spyOn(
+          channel as unknown as {
+            pushProactive(target: SessionTarget, text: string): Promise<void>;
+          },
+          'pushProactive',
+        )
+        .mockResolvedValue(undefined);
+
+      await channel
+        .dispatchBackgroundResponse('session-1', 'Lost result.', {
+          taskId: 'agent-1',
+          status: 'running',
+          kind: 'agent',
+          turnId: 'turn-1',
+          turnComplete: false,
+          label: 'Worker one',
+        })
+        .catch(() => undefined);
+      await vi.advanceTimersByTimeAsync(2 * 30 * 1000);
+      expect(resolveDelivery).toHaveBeenCalledTimes(3);
+
+      await channel
+        .dispatchBackgroundResponse('session-1', 'Next turn result.', {
+          taskId: 'agent-1',
+          status: 'running',
+          kind: 'agent',
+          turnId: 'turn-2',
+          turnComplete: false,
+          label: 'Worker two',
+        })
+        .catch(() => undefined);
+      expect(resolveDelivery).toHaveBeenCalledTimes(4);
+      await vi.advanceTimersByTimeAsync(30 * 1000);
+      expect(resolveDelivery).toHaveBeenCalledTimes(5);
+      await channel.dispatchBackgroundResponse('session-1', '', {
+        taskId: 'agent-1',
+        status: 'completed',
+        kind: 'agent',
+        turnId: 'turn-2',
+        turnComplete: true,
+        label: 'Worker two',
+      });
+
       expect(pushProactive.mock.calls.map((call) => call[1])).toEqual([
         '## ✅ Agent · Worker two\n\nNext turn result.',
       ]);

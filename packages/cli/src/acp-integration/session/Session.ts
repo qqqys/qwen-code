@@ -9704,6 +9704,8 @@ export class Session implements SessionContext {
       this.config.getWorkingDir(),
       async () => {
         const ac = new AbortController();
+        const promptId =
+          this.config.getSessionId() + '########notification' + Date.now();
         let responseSegmentEmitted = false;
         let responseTurnComplete = false;
         const finishBackgroundNotificationTurn = async (
@@ -9716,6 +9718,7 @@ export class Session implements SessionContext {
                 item,
                 '',
                 ac.signal,
+                promptId,
                 true,
                 partial,
               );
@@ -9733,8 +9736,6 @@ export class Session implements SessionContext {
         const continuesCurrentWorkChain =
           this.#notificationContinuesTodoStopGuardWorkChain(item);
         this.#prepareTodoStopGuardForAutomaticTurn(continuesCurrentWorkChain);
-        const promptId =
-          this.config.getSessionId() + '########notification' + Date.now();
         try {
           await this.assertCanStartTurn();
           if (ac.signal.aborted) return;
@@ -9902,6 +9903,7 @@ export class Session implements SessionContext {
                 item,
                 responseText,
                 ac.signal,
+                promptId,
                 turnComplete,
               );
               if (responseText.length > 0) responseSegmentEmitted = true;
@@ -10032,6 +10034,7 @@ export class Session implements SessionContext {
     item: BackgroundNotificationQueueItem,
     text: string,
     signal: AbortSignal,
+    turnId: string,
     turnComplete: boolean,
     partial = false,
   ): Promise<void> {
@@ -10053,6 +10056,7 @@ export class Session implements SessionContext {
           kind: item.kind,
           toolUseId: item.toolUseId,
           ...(label ? { label } : {}),
+          turnId,
           turnComplete,
           ...(partial ? { partial: true } : {}),
         },

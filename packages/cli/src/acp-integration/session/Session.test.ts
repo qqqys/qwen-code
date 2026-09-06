@@ -9763,6 +9763,9 @@ describe('Session', () => {
               kind: 'agent',
               toolUseId: 'tool-1',
               label: 'worker',
+              turnId: expect.stringMatching(
+                /^test-session-id########notification\d+$/,
+              ),
               turnComplete: true,
             },
           },
@@ -9866,6 +9869,18 @@ describe('Session', () => {
             params.update._meta?.['source'] ===
             'background_notification_response',
         );
+      const responseTurnIds = responses.map(
+        (params) =>
+          (
+            params.update._meta?.['backgroundTask'] as
+              | { turnId?: string }
+              | undefined
+          )?.turnId,
+      );
+      expect(responseTurnIds[0]).toMatch(
+        /^test-session-id########notification\d+$/,
+      );
+      expect(responseTurnIds[1]).toBe(responseTurnIds[0]);
       expect(responses).toEqual([
         expect.objectContaining({
           update: expect.objectContaining({
@@ -10472,6 +10487,9 @@ describe('Session', () => {
                 kind: 'shell',
                 toolUseId: undefined,
                 label: 'npm test',
+                turnId: expect.stringMatching(
+                  /^test-session-id########notification\d+$/,
+                ),
                 turnComplete: true,
               },
             },
@@ -12229,6 +12247,9 @@ describe('Session', () => {
               status: 'completed',
               kind: 'shell',
               toolUseId: undefined,
+              turnId: expect.stringMatching(
+                /^test-session-id########notification\d+$/,
+              ),
               turnComplete: true,
             },
           },

@@ -87,6 +87,7 @@ export interface BackgroundResponseContext {
   kind: 'agent' | 'monitor' | 'shell' | 'workflow';
   toolUseId?: string;
   label?: string;
+  turnId?: string;
   turnComplete?: boolean;
   partial?: boolean;
 }
@@ -115,7 +116,7 @@ export function parseBackgroundResponseContext(
   }
 
   const context: BackgroundResponseContext = { taskId, status, kind };
-  for (const field of ['toolUseId', 'label'] as const) {
+  for (const field of ['toolUseId', 'label', 'turnId'] as const) {
     const fieldValue = record[field];
     if (typeof fieldValue === 'string' && fieldValue) {
       context[field] = fieldValue;
