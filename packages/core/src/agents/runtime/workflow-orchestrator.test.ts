@@ -1651,6 +1651,55 @@ describe('WorkflowOrchestrator', () => {
     ]);
   });
 
+  // The ordinary interrupted fan-out: one agent was still in flight when the
+  // run stopped, its sibling had already finished. On resume the unfinished
+  // one is a respawn; the finished one re-runs only because the prefix
+  // invariant sends everything after a miss live, which is a fact about the
+  // run, not about that agent.
+  it('does not report a respawn for a completed call dragged live by the invariant', async () => {
+    const { buildReplay, deriveAgentKey, deriveArgsSeed } = await import(
+      './workflow-journal.js'
+    );
+    const keyA = deriveAgentKey(deriveArgsSeed(undefined), 'a', {});
+    const keyB = deriveAgentKey(keyA, 'b', {});
+    const journal = {
+      path: 'mem',
+      append: async () => {},
+      drain: () => Promise.resolve(),
+    } as unknown as import('./workflow-journal.js').WorkflowJournal;
+
+    const respawns: Array<{ label: string | undefined; wasFailed: boolean }> =
+      [];
+    const dispatched: string[] = [];
+    const orchestrator = new WorkflowOrchestrator(async (prompt) => {
+      dispatched.push(prompt);
+      return `live:${prompt}`;
+    });
+
+    const outcome = await orchestrator.run({
+      script: `await agent('a', { label: 'inflight' }); return await agent('b', { label: 'finished' });`,
+      args: undefined,
+      journal,
+      resumeReplay: buildReplay([
+        // 'a' was in flight when the run stopped: started, never resulted.
+        { type: 'started', key: keyA, agentId: '1' },
+        // 'b' had already come back.
+        { type: 'started', key: keyB, agentId: '2' },
+        { type: 'result', key: keyB, agentId: '2', result: 'from the journal' },
+      ]),
+      emitter: {
+        resumeRespawn: (label, _priorAttempts, wasFailed) =>
+          respawns.push({ label, wasFailed }),
+      },
+    });
+
+    // Both run live — that part is the existing invariant and is unchanged.
+    expect(dispatched).toEqual(['a', 'b']);
+    expect(outcome.result).toBe('live:b');
+    // Only the one that never finished is a respawn.
+    expect(respawns).toEqual([{ label: 'inflight', wasFailed: false }]);
+  });
+
   it('reports no respawn when the journal had a result to replay', async () => {
     const { buildReplay, deriveAgentKey, deriveArgsSeed } = await import(
       './workflow-journal.js'

@@ -1885,6 +1885,18 @@ await agent('scan package.json')
       expect(parts[0].text).toBe('agent failed');
       expect(result.error).toBeUndefined();
       expect(parts[1].text).toContain('failures (1):');
+
+      // The record actually reaches the file a resume will read. The
+      // orchestrator tests pin WHEN it is written against an in-memory
+      // journal and the journal tests pin the append itself; this is the
+      // one place both halves are exercised through a real run.
+      const lines = (await fs.readFile(result.journalPath!, 'utf8'))
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+      expect(lines.map((line) => line['type'])).toEqual(['started', 'failed']);
+      expect(lines[1]['key']).toBe(lines[0]['key']);
+      expect(lines[1]['agentId']).toBe(lines[0]['agentId']);
     });
 
     it('carries the trailer and the last log lines on the failure path', async () => {

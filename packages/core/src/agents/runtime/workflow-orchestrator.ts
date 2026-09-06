@@ -1813,13 +1813,27 @@ export class WorkflowOrchestrator {
             );
           }
         }
-        // Running live over a key the journal already knows: the previous
-        // run either failed this dispatch or was interrupted with it in
-        // flight. Both re-run, but they are worth telling apart — a failure
-        // is likely to repeat, an interruption is not — so report which one
-        // instead of leaving the operator to infer it from a missing result.
+        // Running live over a key the journal started but never finished:
+        // the previous run either failed this dispatch or was interrupted
+        // with it in flight. Both re-run, but they are worth telling apart —
+        // a failure is likely to repeat, an interruption is not — so report
+        // which one instead of leaving the operator to infer it from a
+        // missing result.
+        //
+        // A key that HAS a journaled result is excluded even though it is
+        // running live: once any call misses, the prefix invariant sends
+        // every later call live too, including ones that completed last
+        // time. Those are re-run because of what happened upstream of them,
+        // and calling that a respawn would blame the invariant on the agent
+        // — in the ordinary interrupted fan-out (one agent in flight, its
+        // siblings already done) it would report every sibling as
+        // interrupted as well.
         const priorStarts = replay?.started.get(journalKey);
-        if (priorStarts && priorStarts.length > 0) {
+        if (
+          priorStarts &&
+          priorStarts.length > 0 &&
+          !replay?.results.has(journalKey)
+        ) {
           try {
             emitter?.resumeRespawn?.(
               typeof opts.label === 'string' ? opts.label : undefined,
