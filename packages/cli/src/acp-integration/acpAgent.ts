@@ -1917,6 +1917,7 @@ function setRequestedSessionApprovalMode(
   mode: ApprovalMode,
   projection?: SessionRestoreProjection,
 ): void {
+  if (isRestrictedApprovalModeConfig(config)) return;
   try {
     const restored = projection?.runtime.recording.sessionApprovalMode;
     config.restoreApprovalModeState({

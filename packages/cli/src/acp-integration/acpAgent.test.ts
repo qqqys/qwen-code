@@ -4295,6 +4295,66 @@ describe('QwenAgent MCP SSE/HTTP support', () => {
     }
   });
 
+  it.each([
+    ['safe mode', true, false],
+    ['bare mode', false, true],
+  ] as const)(
+    'keeps new sessions in DEFAULT when %s ignores an explicit mode',
+    async (_label, safeMode, bareMode) => {
+      const innerConfig = makeInnerConfig();
+      const restoreApprovalModeState = vi.fn();
+      Object.assign(innerConfig, {
+        isSafeMode: vi.fn().mockReturnValue(safeMode),
+        getBareMode: vi.fn().mockReturnValue(bareMode),
+        restoreApprovalModeState,
+      });
+      vi.mocked(loadCliConfig).mockResolvedValue(
+        innerConfig as unknown as Config,
+      );
+      vi.mocked(Session).mockImplementation(
+        (sessionId: string) =>
+          ({
+            getId: vi.fn().mockReturnValue(sessionId),
+            shouldHintAskUserQuestionRestore: vi.fn().mockReturnValue(false),
+            sendAvailableCommandsUpdate: vi.fn().mockResolvedValue(undefined),
+            replayHistory: vi.fn().mockResolvedValue(undefined),
+            installRewriter: vi.fn(),
+            startCronScheduler: vi.fn(),
+            dispose: vi.fn(),
+          }) as unknown as InstanceType<typeof Session>,
+      );
+      const agentPromise = runAcpAgent(
+        mockConfig,
+        makeSessionSettings(),
+        mockArgv,
+      );
+      await vi.waitFor(() => expect(capturedAgentFactory).toBeDefined());
+      const agent = capturedAgentFactory!({
+        get closed() {
+          return mockConnectionState.promise;
+        },
+      }) as AgentLike;
+
+      try {
+        const response = await agent.newSession({
+          cwd: '/tmp',
+          mcpServers: [],
+          _meta: { [SESSION_APPROVAL_MODE_META_KEY]: 'yolo' },
+        });
+
+        expect(restoreApprovalModeState).not.toHaveBeenCalled();
+        expect(response).toEqual(
+          expect.objectContaining({
+            modes: expect.objectContaining({ currentModeId: 'default' }),
+          }),
+        );
+      } finally {
+        mockConnectionState.resolve();
+        await agentPromise;
+      }
+    },
+  );
+
   it('records the failed newSession stage without changing the error', async () => {
     const configError = new Error('config failed');
     vi.mocked(loadCliConfig).mockRejectedValue(configError);
@@ -23869,6 +23929,58 @@ describe('QwenAgent loadSession / unstable_resumeSession', () => {
 
       mockConnectionState.resolve();
       await agentPromise;
+    },
+  );
+
+  it.each([
+    ['load', 'safe mode', true, false],
+    ['resume', 'safe mode', true, false],
+    ['load', 'bare mode', false, true],
+    ['resume', 'bare mode', false, true],
+  ] as const)(
+    'cold %s keeps the session in DEFAULT when %s ignores an explicit mode',
+    async (action, _label, safeMode, bareMode) => {
+      const innerConfig = bindRestoreMocks({
+        sessionExists: true,
+        resumedConversation: {
+          messages: [
+            {
+              uuid: 'mode-1',
+              type: 'system',
+              subtype: 'session_approval_mode',
+              systemPayload: { mode: 'default' },
+            },
+          ],
+        },
+      });
+      innerConfig.isSafeMode.mockReturnValue(safeMode);
+      innerConfig.getBareMode.mockReturnValue(bareMode);
+      const { agent, agentPromise } = await spawnAgent();
+      const request = {
+        cwd: '/tmp',
+        sessionId: 'persisted-1',
+        mcpServers: [],
+        _meta: { [SESSION_APPROVAL_MODE_META_KEY]: 'yolo' },
+      };
+
+      try {
+        const response =
+          action === 'load'
+            ? await agent.loadSession(request)
+            : await agent.unstable_resumeSession(request);
+
+        expect(innerConfig.restoreApprovalModeState).not.toHaveBeenCalledWith({
+          mode: 'yolo',
+        });
+        expect(response).toEqual(
+          expect.objectContaining({
+            modes: expect.objectContaining({ currentModeId: 'default' }),
+          }),
+        );
+      } finally {
+        mockConnectionState.resolve();
+        await agentPromise;
+      }
     },
   );
 
