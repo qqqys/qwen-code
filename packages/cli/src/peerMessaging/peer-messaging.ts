@@ -41,6 +41,7 @@ import {
   type PeerInbox,
   type PeerOrigin,
   type PeerUserFrame,
+  readPeerControllerRegistrySync,
   resolveControllerToken,
   sendDeliveryStatus,
   type SettledPeerReceipt,
@@ -172,6 +173,8 @@ export class PeerMessaging {
   private readonly receiptListeners = new Set<(receipt: PeerReceipt) => void>();
   private submitFn: PeerSubmitFn | null = null;
   private readonly buffered: BufferedDelivery[] = [];
+  private controllerRegistryPath: string | null = null;
+  private validControllerIds: ReadonlySet<string> | null = null;
   /**
    * Accepted frames whose 'delivered' receipt has not been earned yet:
    * still buffered here or still queued in the session's input queue.
@@ -202,6 +205,7 @@ export class PeerMessaging {
     const messaging = new PeerMessaging();
     const controllerRegistryPath =
       options.controllerRegistryPath ?? getPeerControllerRegistryPath();
+    messaging.controllerRegistryPath = controllerRegistryPath;
 
     const gate = new InboundGate({
       getApprovalMode: options.getApprovalMode,
@@ -212,6 +216,7 @@ export class PeerMessaging {
       ...(options.getPolicyScope
         ? { getPolicyScope: options.getPolicyScope }
         : {}),
+      isControllerValid: (id) => messaging.validControllerIds?.has(id) ?? true,
       getSessionId: options.getSessionId,
       deliver: (frame, origin) => messaging.deliver(frame, origin),
       reportStatus: (frame, status) => {
@@ -306,14 +311,16 @@ export class PeerMessaging {
    */
   setSubmitFn(fn: PeerSubmitFn): void {
     if (this.closed) return;
-    this.submitFn = fn;
-    // A refused frame means the queue is full; leave it and the rest
-    // buffered — `deliver` retries them, in order, on the next arrival.
-    while (this.buffered.length > 0) {
-      const head = this.buffered[0];
-      if (!head || !this.submit(head.frame, head.origin)) break;
-      this.buffered.shift();
-    }
+    this.withControllerValidity(() => {
+      this.submitFn = fn;
+      // A refused frame means the queue is full; leave it and the rest
+      // buffered — `deliver` retries them, in order, on the next arrival.
+      while (this.buffered.length > 0) {
+        const head = this.buffered[0];
+        if (!head || !this.submit(head.frame, head.origin)) break;
+        this.buffered.shift();
+      }
+    });
   }
 
   /**
@@ -328,7 +335,7 @@ export class PeerMessaging {
   }
 
   getHeld(): readonly HeldMessage[] {
-    return this.gate?.getHeld() ?? [];
+    return this.withControllerValidity(() => this.gate?.getHeld() ?? []);
   }
 
   /**
@@ -414,17 +421,23 @@ export class PeerMessaging {
     msgId: string,
     decision: 'approve' | 'deny',
   ): 'done' | 'failed' | 'gone' {
-    return this.gate?.decide(msgId, decision) ?? 'gone';
+    return this.withControllerValidity(
+      () => this.gate?.decide(msgId, decision) ?? 'gone',
+    );
   }
 
   /** Remove a revoked grant's authority from messages already waiting. */
   forgetController(id: string): number {
-    return this.gate?.forgetController(id) ?? 0;
+    return this.withControllerValidity(
+      () => this.gate?.forgetController(id) ?? 0,
+    );
   }
 
   /** Release everything the gate now considers acceptable. */
   reevaluate(reason: string): number {
-    return this.gate?.reevaluate(reason) ?? 0;
+    return this.withControllerValidity(
+      () => this.gate?.reevaluate(reason) ?? 0,
+    );
   }
 
   onHeldChange(listener: (held: readonly HeldMessage[]) => void): () => void {
@@ -586,12 +599,16 @@ export class PeerMessaging {
       this.trackOutstanding(frame);
       return;
     }
-    while (this.buffered.length > 0) {
-      const head = this.buffered[0];
-      if (!head || !this.submit(head.frame, head.origin)) {
-        throw new Error('accepted-message backlog is full');
-      }
-      this.buffered.shift();
+    if (this.buffered.length > 0) {
+      this.withControllerValidity(() => {
+        while (this.buffered.length > 0) {
+          const head = this.buffered[0];
+          if (!head || !this.submit(head.frame, head.origin)) {
+            throw new Error('accepted-message backlog is full');
+          }
+          this.buffered.shift();
+        }
+      });
     }
     if (!this.submit(frame, origin)) {
       throw new Error('accepted-message backlog is full');
@@ -607,6 +624,28 @@ export class PeerMessaging {
     // was necessarily consumed.
     while (this.outstanding.length > 2 * MAX_ACCEPTED_BACKLOG) {
       this.outstanding.shift();
+    }
+  }
+
+  private withControllerValidity<T>(action: () => T): T {
+    if (this.controllerRegistryPath === null || this.validControllerIds) {
+      return action();
+    }
+    this.validControllerIds = new Set(
+      readPeerControllerRegistrySync(
+        this.controllerRegistryPath,
+      ).controllers.map((controller) => controller.id),
+    );
+    for (const delivery of this.buffered) {
+      const controller = delivery.origin.controller;
+      if (controller && !this.validControllerIds.has(controller.id)) {
+        delete delivery.origin.controller;
+      }
+    }
+    try {
+      return action();
+    } finally {
+      this.validControllerIds = null;
     }
   }
 

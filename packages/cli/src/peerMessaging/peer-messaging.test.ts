@@ -1792,6 +1792,61 @@ describe.skipIf(isWindows)('controller grants', () => {
     expect(m.getHeld()).toMatchObject([{ cause: 'no-mode-asserted' }]);
   });
 
+  it('keeps an externally revoked controller message parked without controller authority', async () => {
+    let policy: 'hold' | undefined = 'hold';
+    const { id, token } = await grant('voice bridge');
+    const { messaging: m, submitted } = await start(ApprovalMode.DEFAULT, {
+      controllerRegistryPath: registryPath,
+      getPolicySetting: () => policy,
+    });
+
+    await send(m.socketPath!, buildUserFrame({ content: 'open the diff' }), {
+      authToken: token,
+    });
+    await settle();
+
+    expect(await removePeerController(id, registryPath)).not.toBeNull();
+    policy = undefined;
+    expect(m.reevaluate('setting cleared')).toBe(0);
+    expect(submitted).toHaveLength(0);
+    expect(m.getHeld()).toMatchObject([{ cause: 'no-mode-asserted' }]);
+    expect(m.getHeld()[0].controller).toBeUndefined();
+  });
+
+  it('removes revoked controller authority from startup-buffered messages', async () => {
+    const { id, token } = await grant('voice bridge');
+    const started = await PeerMessaging.start({
+      socketPath: path.join(tmpDir, 'socks', 'self.sock'),
+      getApprovalMode: () => ApprovalMode.DEFAULT,
+      getPolicySetting: () => undefined,
+      updateSessionRegistryIpcPath: async () => {},
+      ipcToken: TEST_TOKEN,
+      childToken: TEST_CHILD_TOKEN,
+      controllerRegistryPath: registryPath,
+    });
+    if (!started) throw new Error('peer messaging failed to start');
+    messaging = started;
+
+    await send(started.socketPath!, buildUserFrame({ content: 'buffered' }), {
+      authToken: token,
+    });
+    await settle();
+    expect(await removePeerController(id, registryPath)).not.toBeNull();
+
+    expect(started.reevaluate('controller removed')).toBe(0);
+    const submitted: Array<{ modelText: string; displayText: string }> = [];
+    started.setSubmitFn((modelText, displayText) => {
+      submitted.push({ modelText, displayText });
+      return true;
+    });
+
+    expect(submitted).toHaveLength(1);
+    expect(submitted[0].modelText).not.toContain('origin="controller"');
+    expect(submitted[0].displayText).toBe(
+      'Message from another session (unknown session): buffered',
+    );
+  });
+
   it('is unavailable when this home has minted nothing', async () => {
     const { messaging: m, submitted } = await start(ApprovalMode.DEFAULT, {
       controllerRegistryPath: registryPath,

@@ -244,6 +244,8 @@ export interface InboundGateOptions {
    * worded without a scope.
    */
   getPolicyScope?: () => PolicyScope | undefined;
+  /** Whether a controller grant still exists. Absent means valid. */
+  isControllerValid?: (id: string) => boolean;
   /** Deliver an accepted message into the session's input queue. */
   deliver: (frame: PeerUserFrame, origin: PeerOrigin) => void;
   /** Report a terminal outcome back to the sender. Best-effort. */
@@ -359,15 +361,35 @@ export class InboundGate {
 
   /** Messages currently parked, oldest first. */
   getHeld(): readonly HeldMessage[] {
+    this.forgetInvalidControllers();
     return this.held;
   }
 
   /** Remove a revoked grant's authority from messages already waiting. */
   forgetController(id: string): number {
+    const isControllerValid = this.options.isControllerValid;
+    return this.forgetControllersWhere(
+      (controller) =>
+        controller.id === id ||
+        (isControllerValid !== undefined && !isControllerValid(controller.id)),
+    );
+  }
+
+  private forgetInvalidControllers(): number {
+    const isControllerValid = this.options.isControllerValid;
+    if (!isControllerValid) return 0;
+    return this.forgetControllersWhere(
+      (controller) => !isControllerValid(controller.id),
+    );
+  }
+
+  private forgetControllersWhere(
+    shouldForget: (controller: PeerControllerIdentity) => boolean,
+  ): number {
     let forgotten = 0;
     for (let index = 0; index < this.held.length; index += 1) {
       const entry = this.held[index];
-      if (!entry || entry.controller?.id !== id) continue;
+      if (!entry?.controller || !shouldForget(entry.controller)) continue;
 
       const next = { ...entry };
       delete next.controller;
@@ -638,6 +660,7 @@ export class InboundGate {
     // Before the lookup: an expired message must read as 'gone' rather
     // than be released by a user acting on a listing that has gone stale.
     this.expireOverdue();
+    this.forgetInvalidControllers();
     const index = this.held.findIndex((entry) => entry.frame.msgId === msgId);
     if (index === -1) return 'gone';
     const [entry] = this.held.splice(index, 1);
@@ -690,6 +713,7 @@ export class InboundGate {
     // lifetime reaches the buffer: sweep against the new one, then re-arm
     // the timer for whatever survives.
     this.expireOverdue();
+    this.forgetInvalidControllers();
     this.rescheduleExpiry();
     if (this.held.length === 0) return 0;
 

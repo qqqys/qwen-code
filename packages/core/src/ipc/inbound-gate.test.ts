@@ -49,6 +49,7 @@ function harness(
     policy?: InboundPolicy;
     heldExpiryMs?: number | null;
     scope?: PolicyScope;
+    isControllerValid?: (id: string) => boolean;
   } = {},
 ): Harness {
   let mode: ApprovalMode | null =
@@ -87,6 +88,9 @@ function harness(
       if (scopeThrows) throw new Error('scope getter exploded');
       return scope;
     },
+    ...(initial.isControllerValid
+      ? { isControllerValid: initial.isControllerValid }
+      : {}),
     deliver: (frame, origin) => {
       if (deliveryFails) throw new Error('accepted-message backlog is full');
       delivered.push(frame);
@@ -1205,6 +1209,58 @@ describe('controller grants', () => {
     expect(h.gate.reevaluate('setting cleared')).toBe(0);
     expect(h.delivered).toHaveLength(0);
     expect(h.gate.getHeld()).toMatchObject([{ cause: 'no-mode-asserted' }]);
+  });
+
+  it('forgets every invalid id removed with the same credential', () => {
+    let isValid = true;
+    const h = harness({
+      policy: 'hold',
+      isControllerValid: () => isValid,
+    });
+    const other: PeerControllerIdentity = {
+      id: 'c_9999ffff',
+      label: 'voice alias',
+    };
+    h.gate.admit(frame(), viaController);
+    h.gate.admit(frame(), { selfSent: false, controller: other });
+
+    isValid = false;
+    expect(h.gate.forgetController(VOICE.id)).toBe(2);
+    expect(h.gate.getHeld()).toHaveLength(2);
+    expect(h.gate.getHeld().every((entry) => !entry.controller)).toBe(true);
+  });
+
+  it('forgets a grant that is no longer valid before automatic re-evaluation', () => {
+    let isValid = true;
+    const h = harness({
+      mode: ApprovalMode.DEFAULT,
+      policy: 'hold',
+      isControllerValid: () => isValid,
+    });
+    const f = frame();
+    h.gate.admit(f, viaController);
+
+    isValid = false;
+    h.setPolicy(undefined);
+    expect(h.gate.reevaluate('setting cleared')).toBe(0);
+    expect(h.delivered).toHaveLength(0);
+    expect(h.gate.getHeld()).toMatchObject([{ cause: 'no-mode-asserted' }]);
+    expect(h.gate.getHeld()[0].controller).toBeUndefined();
+  });
+
+  it('does not attribute a manually approved message to an invalid grant', () => {
+    let isValid = true;
+    const h = harness({
+      policy: 'hold',
+      isControllerValid: () => isValid,
+    });
+    const f = frame();
+    h.gate.admit(f, viaController);
+
+    isValid = false;
+    expect(h.gate.decide(f.msgId, 'approve')).toBe('done');
+    expect(h.delivered).toEqual([f]);
+    expect(h.deliveredControllers).toEqual([undefined]);
   });
 
   it('keeps its origin when re-evaluation changes only the hold cause', () => {
