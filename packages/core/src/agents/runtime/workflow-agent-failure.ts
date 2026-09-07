@@ -9,14 +9,13 @@
  *
  * A workflow dispatches agents the way a script calls functions, but an agent
  * is not a function: it can hit its turn cap, time out, have its model error
- * out, or be stopped by the user, and none of that says anything about
+ * out, stall, or fail during setup, and none of that says anything about
  * whether the REST of the script can proceed. Those outcomes are the agent's
  * own, and the script sees them as `null` — the same value `parallel()` and
  * `pipeline()` have always put in a slot whose agent did not come back.
  *
- * Everything else is the run's: the token budget is gone, the agent cap is
- * reached, an agent stalled through every attempt, the user cancelled the
- * run. Those throw, because no later `agent()` call can succeed either.
+ * The token budget, the agent cap, and cancellation belong to the run. Those
+ * throw, because no later `agent()` call can succeed either.
  *
  * Before this split, a bare `await agent()` threw on all of it while the same
  * failure inside `parallel()` became `null`, so the same broken agent ended a
@@ -35,8 +34,8 @@ export type WorkflowAgentFailureKind =
   | 'error'
   /** `agent({schema})`: the subagent never produced a valid structured result. */
   | 'no_structured_output'
-  /** The user stopped this one agent (not the run). */
-  | 'user_skip';
+  /** The subagent made no progress through every watchdog attempt. */
+  | 'stalled';
 
 /**
  * An agent-level failure. The dispatch layer catches this, records `failed`
@@ -77,14 +76,29 @@ export function isWorkflowAgentFailedError(
   );
 }
 
+/** The run cannot dispatch another agent because its per-run cap is spent. */
+export class WorkflowAgentCapExceededError extends Error {
+  override readonly name = 'WorkflowAgentCapExceededError';
+
+  constructor(maxAgents: number) {
+    super(
+      `Workflow exceeded the maximum of ${maxAgents} agent() calls per run.`,
+    );
+  }
+}
+
+/** Limits that make every later agent call fail too. */
+export function isWorkflowRunLevelError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false;
+  const name = (error as { name?: unknown }).name;
+  return (
+    name === 'WorkflowBudgetExceededError' ||
+    name === 'WorkflowAgentCapExceededError'
+  );
+}
+
 /**
- * Abort reasons on a dispatch's per-attempt controller. The stall watchdog
- * owns `stalled`; the other two come from the user acting on ONE agent row
- * rather than on the run, and are read by the stall wrapper to decide between
- * retrying, failing the agent, and propagating.
+ * Abort reason on a dispatch's per-attempt controller. The stall watchdog
+ * owns this value so the wrapper can distinguish its retry from cancellation.
  */
 export const WORKFLOW_ABORT_REASON_STALLED = 'stalled';
-/** The user stopped this agent: the script gets `null`, the run continues. */
-export const WORKFLOW_ABORT_REASON_USER_SKIP = 'user-skip';
-/** The user asked for this agent to be re-run: consumes a stall attempt. */
-export const WORKFLOW_ABORT_REASON_USER_RETRY = 'user-retry';

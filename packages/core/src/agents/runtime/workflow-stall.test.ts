@@ -16,7 +16,6 @@ import {
 } from './workflow-stall.js';
 import {
   isWorkflowAgentFailedError,
-  WORKFLOW_ABORT_REASON_USER_SKIP,
   type WorkflowAgentFailedError,
 } from './workflow-agent-failure.js';
 import { DEFAULT_RETRY_OPTIONS } from '../../utils/retry.js';
@@ -254,6 +253,8 @@ describe('runStallResilient', () => {
       caught = e;
     }
     expect(calls).toBe(MAX_STALL_ATTEMPTS);
+    expect(isWorkflowAgentFailedError(caught)).toBe(true);
+    expect((caught as WorkflowAgentFailedError).kind).toBe('stalled');
     expect(String(caught)).toMatch(/stalled on all 3 attempts/);
   });
 
@@ -298,58 +299,6 @@ describe('runStallResilient', () => {
     }
     expect(calls).toBe(1);
     expect(String(caught)).toMatch(/MAX_TURNS/);
-  });
-
-  // The user stopped ONE agent. Not a stall (they asked for it to end, so no
-  // retry) and not a run failure (the rest of the script is untouched) — the
-  // dispatch layer reads this class and hands the script `null`.
-  it('turns a user-skip abort into an agent-level failure without retrying', async () => {
-    let calls = 0;
-    let controller: AbortController | undefined;
-    const attemptFn = async (signal: AbortSignal): Promise<string> => {
-      calls += 1;
-      controller!.abort(WORKFLOW_ABORT_REASON_USER_SKIP);
-      throw new Error(
-        `Workflow subagent did not complete (terminate mode: CANCELLED). ${signal.aborted}`,
-      );
-    };
-
-    const caught = await runStallResilient(attemptFn, {
-      stallMs: 1000,
-      label: 'scout',
-      controllerFactory: () => {
-        controller = new AbortController();
-        return controller;
-      },
-    }).catch((e) => e);
-
-    expect(calls).toBe(1);
-    expect(isWorkflowAgentFailedError(caught)).toBe(true);
-    expect((caught as WorkflowAgentFailedError).kind).toBe('user_skip');
-    expect(String(caught)).toMatch(/agent "scout" was stopped by the user/);
-  });
-
-  // A parent abort is the run ending, and it takes priority: the user
-  // cancelled everything, not this one agent.
-  it('lets a parent abort win over a user-skip on the attempt', async () => {
-    const parent = new AbortController();
-    let controller: AbortController | undefined;
-    const attemptFn = async (): Promise<string> => {
-      controller!.abort(WORKFLOW_ABORT_REASON_USER_SKIP);
-      parent.abort();
-      throw new Error('cancelled');
-    };
-
-    const caught = await runStallResilient(attemptFn, {
-      stallMs: 1000,
-      signal: parent.signal,
-      controllerFactory: () => {
-        controller = new AbortController();
-        return controller;
-      },
-    }).catch((e) => e);
-
-    expect(isWorkflowAgentFailedError(caught)).toBe(false);
   });
 
   it('does NOT retry on parent abort (propagates)', async () => {

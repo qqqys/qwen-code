@@ -2060,7 +2060,7 @@ describe('WorkflowRunRegistry', () => {
     );
     expect(failuresBlock).toContain('[agent-0] boom 0');
     expect(failuresBlock).not.toContain('[agent-10]');
-    expect(failuresBlock).toContain('… and 2 more (see /workflows wf_many)');
+    expect(failuresBlock).toContain('… and 2 more failures omitted');
     expect(modelText).toContain(`agents_failed=${MAX_FAILURE_LINES + 2}`);
   });
 
@@ -2084,7 +2084,7 @@ describe('WorkflowRunRegistry', () => {
   // "Why is it running that agent again?" is the first question a resume
   // raises, and the two answers call for different reactions.
   it.each([
-    [true, 're-running "scout": it failed in the previous run'],
+    [true, '[resume] re-running "scout": it failed in the previous run'],
     [
       false,
       '[resume] respawning "scout": interrupted in a previous run (2 prior attempts)',
@@ -2095,7 +2095,18 @@ describe('WorkflowRunRegistry', () => {
     r.setCompletionCallback(completion);
     const entry = r.register(reg('wf_respawn', { isBackgrounded: true }));
 
-    r.onResumeRespawn(entry.runId, 'scout', wasFailed ? 1 : 2, wasFailed);
+    r.onResumeRespawn(entry.runId, expected);
+    expect(r.get(entry.runId)?.recentLogs.at(-1)).toContain(expected);
+    expect(
+      r
+        .get(entry.runId)
+        ?.events.filter(
+          (event) => event.type === 'log' && event.message === expected,
+        ),
+    ).toHaveLength(1);
+    // Settlement replaces the live mirror from the sandbox buffer. The
+    // respawn line must therefore be present in that buffer too.
+    r.setRecentLogs(entry.runId, [expected]);
 
     expect(r.get(entry.runId)?.agentsRespawned).toBe(1);
     expect(r.get(entry.runId)?.recentLogs.at(-1)).toContain(expected);
@@ -2104,6 +2115,18 @@ describe('WorkflowRunRegistry', () => {
     expect(completion.mock.calls[0][1] as string).toContain(
       'agents_respawned=1',
     );
+  });
+
+  it('rejects the respawn counter and log together after terminal settlement', () => {
+    const r = new WorkflowRunRegistry();
+    const entry = r.register(reg('wf_terminal_respawn'));
+    r.complete(entry.runId, [], 3_000);
+
+    const line = '[resume] respawning an agent: interrupted in a previous run';
+    r.onResumeRespawn(entry.runId, line);
+
+    expect(r.get(entry.runId)?.agentsRespawned).toBe(0);
+    expect(r.get(entry.runId)?.recentLogs).not.toContain(line);
   });
 
   it('reports usage and the recovery route on a background failure', () => {

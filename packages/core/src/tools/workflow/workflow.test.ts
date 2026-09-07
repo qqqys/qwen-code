@@ -153,9 +153,12 @@ describe('WorkflowTool', () => {
     // model that does not know `agent()` can resolve to `null` writes code
     // that treats a failed agent's absence as a value.
     expect(description).toMatch(
-      /`agent\(\)` resolves to `null` when that agent failed on its own/,
+      /`agent\(\)` resolves to `null` when that admitted agent fails on its own/,
     );
+    expect(description).toMatch(/exhausted stall retries/);
+    expect(description).not.toMatch(/user stopped it/);
     expect(description).toMatch(/It THROWS only for run-level conditions/);
+    expect(description).toMatch(/run-level rejections end a `parallel\(\)`/);
     expect(description).toMatch(
       /named, with its error, in the run's failures list/,
     );
@@ -643,6 +646,11 @@ await agent('scan package.json')
     );
     expect(scriptDescription).toContain(MAX_WORKFLOW_AGENTS_ENV);
     expect(scriptDescription).toContain(MAX_WORKFLOW_CONCURRENCY_ENV);
+    expect(scriptDescription).toContain('it resolves to null');
+    expect(scriptDescription).toContain(
+      'subagent completed without calling StructuredOutput (after 2 in-conversation nudges)',
+    );
+    expect(scriptDescription).toContain('run-level token/agent-cap refusal');
     // Both halves must agree on the agent cap, whatever it is.
     expect(tool.description).toContain(
       `${DEFAULT_MAX_AGENTS_PER_RUN} agents total`,
@@ -1785,6 +1793,33 @@ await agent('scan package.json')
         .execute(new AbortController().signal);
 
       await expect(fs.stat(result.journalPath!)).resolves.toBeDefined();
+    });
+
+    it('annotates the dispatched count when a resume re-runs an agent', async () => {
+      const { config } = storedConfig();
+      const first = await new WorkflowTool(config, {
+        dispatch: async () => {
+          throw new WorkflowAgentFailedError('first attempt failed', 'error');
+        },
+      })
+        .build({ script: `return await agent('one');` })
+        .execute(new AbortController().signal);
+      const runId = first.scriptPath!.match(/(wf_[0-9a-f]+)\.js$/)![1];
+
+      const resumed = await new WorkflowTool(config, {
+        dispatch: async () => 'recovered',
+      })
+        .build({
+          scriptPath: first.scriptPath,
+          resumeFromRunId: runId,
+        })
+        .execute(new AbortController().signal);
+
+      const trailer = (resumed.llmContent as Array<{ text: string }>)[1]!.text;
+      expect(trailer).toContain(
+        'agents: 1 dispatched (1 re-ran from a prior run) · 1 completed',
+      );
+      expect(trailer).not.toContain('· 1 respawned');
     });
 
     it('omits the file lines when the config has no storage', async () => {

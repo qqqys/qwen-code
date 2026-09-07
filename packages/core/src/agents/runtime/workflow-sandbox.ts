@@ -572,17 +572,8 @@ export interface WorkflowOrchestratorEmitter {
    * `WorkflowRunRequest.budget`.
    */
   budgetUpdated?(spent: number, total: number | null): void;
-  /**
-   * A resume ran a journaled call live again. `wasFailed` separates the two
-   * reasons that can happen: the previous run's dispatch settled without a
-   * result (`true`), or the run was interrupted with this agent still in
-   * flight (`false`). `priorAttempts` counts the `started` records behind it.
-   */
-  resumeRespawn?(
-    label: string | undefined,
-    priorAttempts: number,
-    wasFailed: boolean,
-  ): void;
+  /** A resume ran a journaled call live again; `line` is also sandbox-logged. */
+  resumeRespawn?(line: string): void;
 }
 
 export interface SandboxOptions {
@@ -599,7 +590,7 @@ export interface SandboxOptions {
   /**
    * Function called by the script's `agent(prompt, opts)` global. Returns the
    * agent's final text, or `null` when that agent failed on its own terms
-   * (turn/time cap, model error, no structured result, the user stopped it) —
+   * (turn/time cap, model error, stall, or no structured result) —
    * the same value a fan-out slot has always carried for a missing agent.
    * Injected so tests can mock without spawning an LLM.
    */
@@ -1185,6 +1176,17 @@ export function createWorkflowSandbox(opts: SandboxOptions): WorkflowSandbox {
           isAbort = false;
         }
         if (isAbort || __b.isRunAborted()) vmErr.__wfAbort = true;
+        var isRunFailure = false;
+        try {
+          isRunFailure = !!(hostErr && (
+            hostErr.__wfRunFailure === true ||
+            hostErr.name === 'WorkflowBudgetExceededError' ||
+            hostErr.name === 'WorkflowAgentCapExceededError'
+          ));
+        } catch (e) {
+          isRunFailure = false;
+        }
+        if (isRunFailure) vmErr.__wfRunFailure = true;
         vmErr.__wfDispatchFailed = true;
         return vmErr;
       }

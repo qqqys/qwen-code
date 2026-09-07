@@ -1276,25 +1276,15 @@ export class WorkflowRunRegistry {
    * "why is it running that agent again?" is the first question a resume
    * raises and the journal alone cannot answer it out loud.
    */
-  onResumeRespawn(
-    runId: string,
-    label: string | undefined,
-    priorAttempts: number,
-    wasFailed: boolean,
-    at = Date.now(),
-  ): void {
+  onResumeRespawn(runId: string, line: string): void {
     const entry = this.entries.get(runId);
-    if (!entry) return;
+    if (
+      !entry ||
+      (!isActiveWorkflowStatus(entry.status) && entry.status !== 'cancelled')
+    )
+      return;
     entry.agentsRespawned = (entry.agentsRespawned ?? 0) + 1;
-    const name = label ? `"${stripAnsiAndControl(label)}"` : 'an agent';
-    this.onLogAppended(
-      runId,
-      wasFailed
-        ? `[resume] re-running ${name}: it failed in the previous run`
-        : `[resume] respawning ${name}: interrupted in a previous run ` +
-            `(${priorAttempts} prior attempt${priorAttempts === 1 ? '' : 's'})`,
-      at,
-    );
+    this.onLogAppended(runId, line);
   }
 
   /**

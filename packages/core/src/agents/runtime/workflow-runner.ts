@@ -380,9 +380,9 @@ export class WorkflowRunner {
         registry?.onBudgetUpdated(runId, spent, total);
         emitUpdate();
       },
-      resumeRespawn: (label, priorAttempts, wasFailed) => {
+      resumeRespawn: (line) => {
         if (!isCurrentEntry()) return;
-        registry?.onResumeRespawn(runId, label, priorAttempts, wasFailed);
+        registry?.onResumeRespawn(runId, line);
         emitUpdate();
       },
     };

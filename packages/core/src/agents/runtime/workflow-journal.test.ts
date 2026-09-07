@@ -134,7 +134,7 @@ describe('buildReplay', () => {
   // The record that separates "this agent failed" from "the run stopped with
   // this agent in flight". Both leave a `started` with no `result`; only the
   // first leaves a `failed`.
-  it('collects failed keys, and a later result still caches', () => {
+  it('uses the latest attempt to classify a key while retaining its result', () => {
     const entries: JournalEntry[] = [
       { type: 'started', key: 'k1', agentId: '1' },
       { type: 'failed', key: 'k1', agentId: '1' },
@@ -144,10 +144,11 @@ describe('buildReplay', () => {
       { type: 'failed', key: 'k2', agentId: '3' },
     ];
     const replay = buildReplay(entries);
-    // A key that failed and then succeeded is served from cache: the result
-    // is the newer fact. `failed` stays as the record of how it got there.
+    // A later start supersedes the earlier failure classification. That
+    // attempt can succeed or remain interrupted, but it is no longer the
+    // failed attempt represented by the older record.
     expect(replay.results.get('k1')?.result).toBe('recovered');
-    expect(replay.failed.has('k1')).toBe(true);
+    expect(replay.failed.has('k1')).toBe(false);
     expect(replay.failed.has('k2')).toBe(true);
     expect(replay.results.has('k2')).toBe(false);
   });

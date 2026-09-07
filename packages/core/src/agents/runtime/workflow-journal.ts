@@ -68,8 +68,7 @@ export interface JournalResultEntry {
 
 /**
  * The dispatch for this key settled without a result: it failed on its own
- * (turn/time cap, model error, the user stopped that agent) or the run failed
- * around it (budget, agent cap, a stall that survived every attempt).
+ * (turn/time cap, model error, setup error, or exhausted stall retries).
  *
  * Written only when the outcome belongs to the dispatch. A run the user
  * cancelled writes nothing, because that is a different thing on resume: an
@@ -204,6 +203,10 @@ export function buildReplay(entries: JournalEntry[]): JournalReplay {
     if (e.type === 'result') {
       results.set(e.key, e);
     } else if (e.type === 'started') {
+      // A later attempt supersedes the prior terminal failure. If it is
+      // interrupted, the next resume must describe it as interrupted rather
+      // than carrying the stale failure classification forward forever.
+      failed.delete(e.key);
       const list = started.get(e.key);
       if (list) list.push(e);
       else started.set(e.key, [e]);

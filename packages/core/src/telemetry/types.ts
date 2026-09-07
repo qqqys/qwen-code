@@ -1486,12 +1486,13 @@ export class WorkflowRunEvent implements BaseTelemetryEvent {
   'event.timestamp': string;
   status: string;
   agents_dispatched: number;
+  /** All settled dispatches; failed and cached are contained in this count. */
   agents_completed: number;
-  /** Dispatches that settled without a result. See JournalFailedEntry. */
+  /** Settled dispatch traces whose terminal status is failed. */
   agents_failed: number;
-  /** Dispatches served from a prior run's journal instead of re-running. */
+  /** Settled dispatches served from a prior run's journal. */
   agents_cached: number;
-  /** Journaled calls a resume ran live again (failed or interrupted before). */
+  /** Dispatched calls re-run from a prior failed or interrupted attempt. */
   agents_respawned: number;
   phase_count: number;
   tokens_spent: number;

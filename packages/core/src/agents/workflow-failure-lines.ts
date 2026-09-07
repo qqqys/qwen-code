@@ -16,14 +16,15 @@
  * the registry — it just never left it.
  *
  * Bounded on purpose: a run that lost forty agents to one outage would
- * otherwise bury its own result under forty near-identical lines. The tail is
- * named rather than printed, with the run id to look it up by.
+ * otherwise bury its own result under forty near-identical lines.
  */
 
 import { stripAnsiAndControl } from '../utils/textUtils.js';
 
 /** Failure lines printed in full before the rest is named. */
 export const MAX_FAILURE_LINES = 10;
+/** Maximum characters retained for one rendered failure line. */
+export const MAX_FAILURE_LINE_CHARS = 400;
 
 /** What a failure list needs from one dispatch. */
 export interface WorkflowFailureDispatch {
@@ -50,13 +51,11 @@ export function buildFailureLines(source: WorkflowFailureSource): string[] {
   const lines = shown.map((dispatch) => {
     const label = stripAnsiAndControl(dispatch.label || 'workflow-agent');
     const error = stripAnsiAndControl(dispatch.error || 'dispatch failed');
-    return `[${label}] ${error}`;
+    return `[${label}] ${error}`.slice(0, MAX_FAILURE_LINE_CHARS);
   });
   const remaining = failed.length - shown.length;
   if (remaining > 0) {
-    lines.push(
-      `… and ${remaining} more (see /workflows ${stripAnsiAndControl(source.runId)})`,
-    );
+    lines.push(`… and ${remaining} more failures omitted`);
   }
   return lines;
 }

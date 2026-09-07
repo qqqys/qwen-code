@@ -34,6 +34,7 @@ import { WorkflowRunner } from './workflow-runner.js';
 import { WorkflowDispatchScheduler } from './workflow-dispatch-scheduler.js';
 import {
   isWorkflowAgentFailedError,
+  WorkflowAgentCapExceededError,
   WorkflowAgentFailedError,
 } from './workflow-agent-failure.js';
 
@@ -365,17 +366,16 @@ describe('WorkflowOrchestrator', () => {
     expect(a.runId).not.toBe(c.runId);
   });
 
-  // TST-C2: a dispatch rejection must propagate out through the sandbox.
-  it('propagates dispatch rejection through the script', async () => {
+  it('settles an unclassified dispatch rejection to null', async () => {
     const orchestrator = new WorkflowOrchestrator(async () => {
       throw new Error('agent-crashed');
     });
     await expect(
       orchestrator.run({
-        script: 'await agent("x"); return 0;',
+        script: 'const value = await agent("x"); return value;',
         args: undefined,
       }),
-    ).rejects.toThrow(/agent-crashed/);
+    ).resolves.toMatchObject({ result: null });
   });
 
   // P4b Round 5 (wenshao): the emitter field on WorkflowRunRequest and
@@ -456,7 +456,7 @@ describe('WorkflowOrchestrator', () => {
         args: undefined,
         emitter,
       }),
-    ).rejects.toThrow(/dispatch-boom/);
+    ).resolves.toMatchObject({ result: 0 });
 
     expect(completions).toHaveLength(1);
     expect(completions[0]).toEqual({
@@ -842,8 +842,8 @@ describe('WorkflowOrchestrator', () => {
     //
     // With the slot-acquire re-check, the gate observes budget mutations
     // from already-completed in-flight dispatches at slot-acquire time, so
-    // queued thunks that arrive AFTER the budget is busted are refused
-    // (the parallel() batch collapses them to `null`).
+    // queued thunks that arrive AFTER the budget is busted are refused and
+    // the run-level limit rejects the batch.
     const { WorkflowBudgetImpl } = await import('./workflow-budget.js');
     const budget = new WorkflowBudgetImpl(100);
     const scheduler = new WorkflowDispatchScheduler(1);
@@ -858,29 +858,23 @@ describe('WorkflowOrchestrator', () => {
     // 10 thunks — far more than the budget (100 / 40 ≈ 3 successful).
     // The slot-acquire gate must reject the rest BEFORE this.dispatch
     // runs, so `dispatchCalls` is exactly 3, NOT 10.
-    const outcome = await orchestrator.run({
-      script: `const results = await parallel(Array.from({length: 10}, () => () => agent('q'))); return results;`,
-      args: undefined,
-      budget,
-      scheduler,
-      emitter: {
-        agentDispatched: () => dispatched++,
-        agentCompleted: () => completed++,
-      },
-    });
-    // parallel() treats budget rejections as errors-as-data → null per slot.
-    expect(Array.isArray(outcome.result)).toBe(true);
-    const results = outcome.result as unknown[];
-    expect(results).toHaveLength(10);
-    const successes = results.filter((r) => r === 'ok').length;
-    const nulls = results.filter((r) => r === null).length;
-    expect(successes + nulls).toBe(10);
+    await expect(
+      orchestrator.run({
+        script: `const results = await parallel(Array.from({length: 10}, () => () => agent('q'))); return results;`,
+        args: undefined,
+        budget,
+        scheduler,
+        emitter: {
+          agentDispatched: () => dispatched++,
+          agentCompleted: () => completed++,
+        },
+      }),
+    ).rejects.toThrow(/exceeded the token budget/);
     // ASSERT it doesn't reach 10 (the without-fix overshoot value):
     // with the scheduler pinned to limit 1, slot-acquire re-checks are
     // serialized, so exactly 3 dispatches pass (spent 0/40/80 at acquire;
     // cap 100).
     expect(dispatchCalls).toBe(3);
-    expect(successes).toBe(3);
     expect(dispatched).toBe(10);
     expect(completed).toBe(dispatched);
   });
@@ -960,18 +954,14 @@ describe('WorkflowOrchestrator', () => {
       agentCompleted: (label?: string, error?: string) =>
         completions.push({ label, error }),
     };
-    let caught: unknown;
-    try {
-      await orchestrator.run({
+    await expect(
+      orchestrator.run({
         script: `await agent('q1'); return 'done';`,
         args: undefined,
         budget,
         emitter,
-      });
-    } catch (e) {
-      caught = e;
-    }
-    expect(caught).toBeInstanceOf(Error);
+      }),
+    ).resolves.toMatchObject({ result: 'done' });
     expect(completions).toHaveLength(1);
     expect(completions[0]?.error).toBe('dispatch-boom');
     // R3 #1 contract: error arm now fires budgetUpdated with the
@@ -1035,18 +1025,14 @@ describe('WorkflowOrchestrator', () => {
     const emitter = {
       budgetUpdated: (spent: number) => budgetUpdates.push(spent),
     };
-    let caught: unknown;
-    try {
-      await orchestrator.run({
+    await expect(
+      orchestrator.run({
         script: `await agent('q1'); return 'done';`,
         args: undefined,
         emitter,
         // budget intentionally omitted
-      });
-    } catch (e) {
-      caught = e;
-    }
-    expect(caught).toBeInstanceOf(Error);
+      }),
+    ).resolves.toMatchObject({ result: 'done' });
     expect(budgetUpdates).toEqual([]);
   });
 
@@ -1094,11 +1080,7 @@ describe('WorkflowOrchestrator', () => {
     expect(outcome.result).toBe('parent:nested-agent:inner');
   });
 
-  it('merges nested workflow logs into the parent run logs', async () => {
-    // R11-22: nested logs (here the unconsumed-rejection mirror) reach
-    // no production surface on the nested sandbox's own buffer — the
-    // orchestrator reads getLogs() only on the top-level sandbox. The
-    // merge must surface a failed nested dispatch in the parent run.
+  it('does not mirror an unconsumed agent failure after it settles to null', async () => {
     const orchestrator = new WorkflowOrchestrator(() =>
       Promise.reject(new Error('nested-boom')),
     );
@@ -1110,19 +1092,14 @@ describe('WorkflowOrchestrator', () => {
         logAppended: (line) => appendedLogs.push(line),
       },
       resolveSavedWorkflow: async () => ({
-        // The fire-and-forget dispatch fails but the nested script
-        // still completes — the only trace of the failure is the
-        // nested mirror line, which the merge must carry upward.
+        // The dispatch trace and failures list carry the failure. The agent
+        // promise resolves to null, so it is not an unhandled rejection.
         script: `agent('x'); return 'child-done';`,
       }),
     });
     expect(outcome.result).toBe('parent:child-done');
-    expect(outcome.logs).toContain(
-      'dispatch failed (result not consumed): nested-boom',
-    );
-    expect(appendedLogs).toEqual([
-      'dispatch failed (result not consumed): nested-boom',
-    ]);
+    expect(outcome.logs).toEqual([]);
+    expect(appendedLogs).toEqual([]);
   });
 
   it('keeps a nested agent result behind the shared pause gate', async () => {
@@ -1541,7 +1518,7 @@ describe('WorkflowOrchestrator', () => {
     const { journal, entries } = memoryJournal();
     const orchestrator = new WorkflowOrchestrator(async (prompt) => {
       if (prompt === 'bad') {
-        throw new WorkflowAgentFailedError('model errored', 'error', 'ERROR');
+        throw new Error('model errored before classification');
       }
       return `r:${prompt}`;
     });
@@ -1558,12 +1535,12 @@ describe('WorkflowOrchestrator', () => {
   });
 
   // A run-level failure is still a run failure: the script does not get to
-  // carry on past a budget or cap exhaustion. It is journaled all the same,
-  // because on resume that key genuinely has no result to replay.
-  it('propagates a run-level dispatch failure and still journals it', async () => {
+  // carry on past a budget or cap exhaustion, and the journal must not call
+  // the admitted agent itself failed.
+  it('propagates a run-level dispatch failure without a failed record', async () => {
     const { journal, entries } = memoryJournal();
     const orchestrator = new WorkflowOrchestrator(async () => {
-      throw new Error('Workflow exceeded the maximum of 1000 agent() calls.');
+      throw new WorkflowAgentCapExceededError(1000);
     });
 
     await expect(
@@ -1574,7 +1551,7 @@ describe('WorkflowOrchestrator', () => {
       }),
     ).rejects.toThrow(/maximum of 1000 agent\(\) calls/);
 
-    expect(entries.map((e) => e.type)).toEqual(['started', 'failed']);
+    expect(entries.map((e) => e.type)).toEqual(['started']);
   });
 
   // The one outcome that is NOT the dispatch's own. Every key open when the
@@ -1629,26 +1606,23 @@ describe('WorkflowOrchestrator', () => {
       drain: () => Promise.resolve(),
     } as unknown as import('./workflow-journal.js').WorkflowJournal;
 
-    const respawns: Array<{
-      label: string | undefined;
-      priorAttempts: number;
-      wasFailed: boolean;
-    }> = [];
+    const respawns: string[] = [];
     const orchestrator = new WorkflowOrchestrator(async () => 'live');
-    await orchestrator.run({
+    const outcome = await orchestrator.run({
       script: `return await agent('x');`,
       args: undefined,
       journal,
       resumeReplay: buildReplay(priorEntries),
       emitter: {
-        resumeRespawn: (label, priorAttempts, failedBefore) =>
-          respawns.push({ label, priorAttempts, wasFailed: failedBefore }),
+        resumeRespawn: (line) => respawns.push(line),
       },
     });
 
-    expect(respawns).toEqual([
-      { label: undefined, priorAttempts: 1, wasFailed },
-    ]);
+    const expected = wasFailed
+      ? '[resume] re-running an agent: it failed in the previous run'
+      : '[resume] respawning an agent: interrupted in a previous run (1 prior attempt)';
+    expect(respawns).toEqual([expected]);
+    expect(outcome.logs).toContain(expected);
   });
 
   // The ordinary interrupted fan-out: one agent was still in flight when the
@@ -1668,8 +1642,7 @@ describe('WorkflowOrchestrator', () => {
       drain: () => Promise.resolve(),
     } as unknown as import('./workflow-journal.js').WorkflowJournal;
 
-    const respawns: Array<{ label: string | undefined; wasFailed: boolean }> =
-      [];
+    const respawns: string[] = [];
     const dispatched: string[] = [];
     const orchestrator = new WorkflowOrchestrator(async (prompt) => {
       dispatched.push(prompt);
@@ -1688,8 +1661,7 @@ describe('WorkflowOrchestrator', () => {
         { type: 'result', key: keyB, agentId: '2', result: 'from the journal' },
       ]),
       emitter: {
-        resumeRespawn: (label, _priorAttempts, wasFailed) =>
-          respawns.push({ label, wasFailed }),
+        resumeRespawn: (line) => respawns.push(line),
       },
     });
 
@@ -1697,7 +1669,9 @@ describe('WorkflowOrchestrator', () => {
     expect(dispatched).toEqual(['a', 'b']);
     expect(outcome.result).toBe('live:b');
     // Only the one that never finished is a respawn.
-    expect(respawns).toEqual([{ label: 'inflight', wasFailed: false }]);
+    expect(respawns).toEqual([
+      '[resume] respawning "inflight": interrupted in a previous run (1 prior attempt)',
+    ]);
   });
 
   it('reports no respawn when the journal had a result to replay', async () => {
@@ -1733,6 +1707,68 @@ describe('WorkflowOrchestrator', () => {
     expect(outcome.result).toBe('cached');
     expect(dispatched).toBe(0);
     expect(respawns).toHaveLength(0);
+  });
+
+  it('does not journal or report a respawn when the budget gate refuses it', async () => {
+    const { WorkflowBudgetImpl } = await import('./workflow-budget.js');
+    const { buildReplay, deriveAgentKey, deriveArgsSeed } = await import(
+      './workflow-journal.js'
+    );
+    const budget = new WorkflowBudgetImpl(1);
+    budget.recordSpent(1);
+    const key = deriveAgentKey(deriveArgsSeed(undefined), 'x', {});
+    const { journal, entries } = memoryJournal();
+    const respawns: string[] = [];
+    const dispatch = vi.fn(async () => 'unused');
+
+    await new WorkflowOrchestrator(dispatch).run({
+      script: `try { await agent('x'); } catch (error) { return error.message; }`,
+      args: undefined,
+      budget,
+      journal,
+      resumeReplay: buildReplay([{ type: 'started', key, agentId: 'prior' }]),
+      emitter: { resumeRespawn: (line) => respawns.push(line) },
+    });
+
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(entries).toEqual([]);
+    expect(respawns).toEqual([]);
+  });
+
+  it('does not journal or report a respawn when the agent cap refuses it', async () => {
+    const previous = process.env['QWEN_CODE_MAX_WORKFLOW_AGENTS'];
+    process.env['QWEN_CODE_MAX_WORKFLOW_AGENTS'] = '1';
+    try {
+      const { buildReplay, deriveAgentKey, deriveArgsSeed } = await import(
+        './workflow-journal.js'
+      );
+      const keyA = deriveAgentKey(deriveArgsSeed(undefined), 'a', {});
+      const keyB = deriveAgentKey(keyA, 'b', {});
+      const { journal, entries } = memoryJournal();
+      const respawns: string[] = [];
+      const dispatch = vi.fn(async (prompt: string) => prompt);
+
+      await new WorkflowOrchestrator(dispatch).run({
+        script: `await agent('a'); try { await agent('b'); } catch (error) { return error.message; }`,
+        args: undefined,
+        journal,
+        resumeReplay: buildReplay([
+          { type: 'started', key: keyB, agentId: 'prior' },
+        ]),
+        emitter: { resumeRespawn: (line) => respawns.push(line) },
+      });
+
+      expect(dispatch).toHaveBeenCalledOnce();
+      expect(entries.map((entry) => entry.type)).toEqual(['started', 'result']);
+      expect(entries.some((entry) => entry.key === keyB)).toBe(false);
+      expect(respawns).toEqual([]);
+    } finally {
+      if (previous === undefined) {
+        delete process.env['QWEN_CODE_MAX_WORKFLOW_AGENTS'];
+      } else {
+        process.env['QWEN_CODE_MAX_WORKFLOW_AGENTS'] = previous;
+      }
+    }
   });
 
   it('assigns journal ids before paused parallel dispatches can dequeue', async () => {
@@ -1848,7 +1884,7 @@ describe('WorkflowOrchestrator', () => {
 
     controller.abort();
 
-    await expect(run).rejects.toThrow('dispatch-boom');
+    await expect(run).resolves.toMatchObject({ result: null });
   });
 
   it('delivers a successful dispatch result when cancellation aborts its pause gate', async () => {
@@ -2905,18 +2941,58 @@ describe('WorkflowOrchestrator P2 — parallel() / pipeline() / caps', () => {
 
     it('the cap counts agents launched via parallel() — a fan-out cannot bypass it', async () => {
       const orchestrator = new WorkflowOrchestrator(async () => 'ok');
-      const outcome = await orchestrator.run({
-        script: `return await parallel(
-          Array.from({ length: ${DEFAULT_MAX_AGENTS_PER_RUN + 1} }, () => () => agent("x"))
-        );`,
-        args: undefined,
-      });
-      const arr = outcome.result as Array<string | null>;
-      // Exactly 1000 dispatches succeed; the one over the cap becomes null.
-      expect(arr.filter((v) => v === 'ok')).toHaveLength(
-        DEFAULT_MAX_AGENTS_PER_RUN,
+      await expect(
+        orchestrator.run({
+          script: `return await parallel(
+            Array.from({ length: ${DEFAULT_MAX_AGENTS_PER_RUN + 1} }, () => () => agent("x"))
+          );`,
+          args: undefined,
+        }),
+      ).rejects.toThrow(
+        new RegExp(`${DEFAULT_MAX_AGENTS_PER_RUN} agent\\(\\) calls per run`),
       );
-      expect(arr.filter((v) => v === null)).toHaveLength(1);
+    });
+
+    it('rejects a pipeline when an agent hits the run-level cap', async () => {
+      const previous = process.env['QWEN_CODE_MAX_WORKFLOW_AGENTS'];
+      process.env['QWEN_CODE_MAX_WORKFLOW_AGENTS'] = '1';
+      try {
+        const orchestrator = new WorkflowOrchestrator(async () => 'ok');
+        await expect(
+          orchestrator.run({
+            script: `return await pipeline(['a', 'b'], (_prev, item) => agent(item));`,
+            args: undefined,
+          }),
+        ).rejects.toThrow(/maximum of 1 agent\(\) call/);
+      } finally {
+        if (previous === undefined) {
+          delete process.env['QWEN_CODE_MAX_WORKFLOW_AGENTS'];
+        } else {
+          process.env['QWEN_CODE_MAX_WORKFLOW_AGENTS'] = previous;
+        }
+      }
+    });
+
+    it('preserves a run-level cap rejection through nested fan-out', async () => {
+      const previous = process.env['QWEN_CODE_MAX_WORKFLOW_AGENTS'];
+      process.env['QWEN_CODE_MAX_WORKFLOW_AGENTS'] = '1';
+      try {
+        const orchestrator = new WorkflowOrchestrator(async () => 'ok');
+        await expect(
+          orchestrator.run({
+            script: `return await parallel([
+              () => parallel([() => agent('a'), () => agent('b')])
+            ]);`,
+            args: undefined,
+          }),
+        ).rejects.toThrow(/maximum of 1 agent\(\) call/);
+      } finally {
+        if (previous === undefined) {
+          delete process.env['QWEN_CODE_MAX_WORKFLOW_AGENTS'];
+        } else {
+          process.env['QWEN_CODE_MAX_WORKFLOW_AGENTS'] = previous;
+        }
+      }
     });
   });
 
@@ -3162,15 +3238,14 @@ describe('WorkflowOrchestrator P2 — parallel() / pipeline() / caps', () => {
       process.env['QWEN_CODE_MAX_WORKFLOW_AGENTS'] = '3';
       try {
         const orchestrator = new WorkflowOrchestrator(async () => 'ok');
-        const outcome = await orchestrator.run({
-          script: `return await parallel(
-            Array.from({ length: 4 }, () => () => agent("x"))
-          );`,
-          args: undefined,
-        });
-        const arr = outcome.result as Array<string | null>;
-        expect(arr.filter((v) => v === 'ok')).toHaveLength(3);
-        expect(arr.filter((v) => v === null)).toHaveLength(1);
+        await expect(
+          orchestrator.run({
+            script: `return await parallel(
+              Array.from({ length: 4 }, () => () => agent("x"))
+            );`,
+            args: undefined,
+          }),
+        ).rejects.toThrow(/maximum of 3 agent\(\) calls per run/);
       } finally {
         if (prev === undefined)
           delete process.env['QWEN_CODE_MAX_WORKFLOW_AGENTS'];
@@ -4080,11 +4155,14 @@ describe('WorkflowOrchestrator P3 — agentType / model / isolation / schema', (
       }),
     });
     const dispatch = createProductionDispatch(config);
-    await expect(
-      dispatch('extract', {
-        schema: { type: 'object' },
-      }),
-    ).rejects.toThrow(
+    const caught = await dispatch('extract', {
+      schema: { type: 'object' },
+    }).catch((error) => error);
+    expect(isWorkflowAgentFailedError(caught)).toBe(true);
+    expect((caught as WorkflowAgentFailedError).kind).toBe(
+      'no_structured_output',
+    );
+    expect(String(caught)).toMatch(
       /subagent completed without calling StructuredOutput \(after 2 in-conversation nudges\)\./,
     );
   });
