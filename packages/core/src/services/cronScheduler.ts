@@ -308,7 +308,8 @@ export class CronScheduler {
     { task: DurableCronTask; index: number }
   >();
   private consumedPerRunOneShots = new Set<string>();
-  // The exact task-file mutation that removed each consumed one-shot.
+  // The durable deletion generation observed by the task-file mutation that
+  // removed each consumed one-shot.
   private consumedPerRunRemovalGenerations = new Map<string, number>();
   // Restored tasks bypass missed detection until a real fire, delete, or edit.
   private restoredPerRunOneShots = new Set<string>();
@@ -908,6 +909,14 @@ export class CronScheduler {
           : t.createdAt;
         const nextFire = computeNextFireMs(t.cron, anchor, jitter);
         if (nextFire === null || nextFire >= now) continue;
+        // A failed per-run dispatch restores the one-shot with the consumed
+        // slot stamped on disk, so edits and restarts must not report it missed.
+        if (
+          !t.recurring &&
+          typeof t.lastFiredAt === 'number' &&
+          t.lastFiredAt >= nextFire - jitter
+        )
+          continue;
         // A live scheduler may reload after another one-shot rewrites the shared
         // tasks file but before this armed job's next 1s tick. Leave that brief
         // handoff to the tick, but recover it as missed once the slot is stale.
@@ -1372,9 +1381,9 @@ export class CronScheduler {
       await updateCronTasks(
         projectRoot,
         (tasks) => {
-          if (restoreGeneration !== removalGeneration + 1) return tasks;
-          restored = true;
+          if (restoreGeneration !== removalGeneration) return tasks;
           const existing = tasks.findIndex((task) => task.id === taskId);
+          restored = true;
           if (existing !== -1) {
             const current = tasks[existing]!;
             if (current.lastFiredAt === snapshot.task.lastFiredAt) return tasks;
@@ -1389,8 +1398,8 @@ export class CronScheduler {
           return next;
         },
         {
-          mutationIds: [taskId],
-          onMutationGenerations: (generations) => {
+          observeDeletionIds: [taskId],
+          onDeletionGenerations: (generations) => {
             restoreGeneration = generations.get(taskId);
           },
         },
@@ -1666,8 +1675,8 @@ export class CronScheduler {
                 };
               }),
           {
-            mutationIds: removedIds,
-            onMutationGenerations: (generations) => {
+            observeDeletionIds: removedIds,
+            onDeletionGenerations: (generations) => {
               removalGenerations = generations;
             },
           },

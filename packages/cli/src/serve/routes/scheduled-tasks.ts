@@ -1754,7 +1754,7 @@ function registerScheduledTaskCrudRoutes(
             },
             {
               assertCanCommit: target.assertGenerationOpen,
-              mutationIds: [id],
+              deletionIds: () => (removed ? [id] : []),
             },
           ),
         );

@@ -13,6 +13,7 @@ import { getLockFilePath } from './cronTasksLock.js';
 import {
   getCronFilePath,
   readCronTasks,
+  removeCronTasks,
   updateCronTasks,
   writeCronTasks,
   type DurableCronTask,
@@ -35,6 +36,7 @@ const readGate = vi.hoisted(() => ({
 const updateGate = vi.hoisted(() => ({
   block: null as Promise<void> | null,
   onHit: null as (() => void) | null,
+  fail: null as Error | null,
 }));
 
 // Failure injection for removeCronTasks: the real on-disk failure modes
@@ -67,6 +69,17 @@ vi.mock('./cronTasksFile.js', async (importOriginal) => {
         updateGate.onHit?.();
         await updateGate.block;
       }
+      if (updateGate.fail) {
+        await actual.updateCronTasks(
+          args[0],
+          (tasks) => {
+            args[1](tasks);
+            return tasks;
+          },
+          args[2],
+        );
+        throw updateGate.fail;
+      }
       return actual.updateCronTasks(...args);
     },
     removeCronTasks: async (
@@ -92,6 +105,7 @@ describe('CronScheduler', () => {
     readGate.fail = null;
     updateGate.block = null;
     updateGate.onHit = null;
+    updateGate.fail = null;
     removeGate.fail = null;
   });
 
@@ -1469,6 +1483,57 @@ describe('CronScheduler', () => {
       }
     });
 
+    it('keeps a restored one-shot after an edit and session restart', async () => {
+      const createdAt = Date.now();
+      const original: DurableCronTask = {
+        ...diskTask('once-restart'),
+        cron: '7 18 * * *',
+        recurring: false,
+        createdAt,
+        sessionId: 'session-1',
+        sessionMode: 'per_run',
+      };
+      await writeCronTasks(tmpDir, [original]);
+      await scheduler.enableDurable('session-1');
+      const fired: CronJob[] = [];
+      let restoration: Promise<boolean> | undefined;
+      scheduler.start((job) => {
+        fired.push(job);
+        restoration = scheduler.restoreConsumedOneShot(job.id);
+      });
+      const fireAt = nextFireTime(original.cron, new Date(createdAt));
+      const now = vi.spyOn(Date, 'now').mockReturnValue(fireAt.getTime() + 500);
+      const restarted = new CronScheduler(tmpDir);
+      try {
+        scheduler.tick(new Date(fireAt.getTime() + 500));
+        expect(await restoration).toBe(true);
+        await updateCronTasks(tmpDir, (tasks) =>
+          tasks.map((task) => ({ ...task, prompt: 'edited' })),
+        );
+        await (
+          scheduler as unknown as {
+            loadFileTasks(handleMissed: boolean): Promise<void>;
+          }
+        ).loadFileTasks(false);
+
+        expect(fired).toHaveLength(1);
+        expect(fired[0]?.missed).toBeUndefined();
+        await settle(scheduler);
+
+        const restartedFires: CronJob[] = [];
+        restarted.start((job) => restartedFires.push(job));
+        await restarted.enableDurable('session-1');
+
+        expect(restartedFires).toHaveLength(0);
+        expect(await readCronTasks(tmpDir)).toEqual([
+          { ...original, prompt: 'edited', lastFiredAt: fireAt.getTime() },
+        ]);
+      } finally {
+        await settle(restarted);
+        now.mockRestore();
+      }
+    });
+
     it('does not re-fire a restored one-shot in its matched minute', async () => {
       const original: DurableCronTask = {
         ...diskTask('once-same-minute'),
@@ -1525,7 +1590,7 @@ describe('CronScheduler', () => {
       await updateCronTasks(
         tmpDir,
         (tasks) => tasks.filter((task) => task.id !== original.id),
-        { mutationIds: [original.id] },
+        { deletionIds: [original.id] },
       );
       release();
 
@@ -1598,9 +1663,47 @@ describe('CronScheduler', () => {
       scheduler.tick(new Date(fireAt.getTime() + 1000));
       await (scheduler as unknown as { pendingPersist: Promise<void> })
         .pendingPersist;
-      await updateCronTasks(tmpDir, (tasks) => tasks, {
-        mutationIds: [original.id],
+      expect(await removeCronTasks(tmpDir, [original.id])).toBe(0);
+      releaseDispatch();
+
+      expect(await restoration).toBe(false);
+      expect(await readCronTasks(tmpDir)).toEqual([]);
+    });
+
+    it('does not restore after a cross-process delete follows a failed fire removal', async () => {
+      const original: DurableCronTask = {
+        ...diskTask('once-delete-after-failed-persist'),
+        cron: '7 18 * * *',
+        recurring: false,
+        sessionId: 'session-1',
+        sessionMode: 'per_run',
+      };
+      await writeCronTasks(tmpDir, [original]);
+      await scheduler.enableDurable('session-1');
+      let releaseDispatch!: () => void;
+      const dispatch = new Promise<void>((resolve) => {
+        releaseDispatch = resolve;
       });
+      let restoration: Promise<boolean> | undefined;
+      scheduler.start((job) => {
+        restoration = dispatch.then(() =>
+          scheduler.restoreConsumedOneShot(job.id),
+        );
+      });
+      updateGate.fail = Object.assign(new Error('ENOSPC: disk full'), {
+        code: 'ENOSPC',
+      });
+
+      const fireAt = nextFireTime(original.cron, new Date(original.createdAt));
+      scheduler.tick(new Date(fireAt.getTime() + 1000));
+      await (scheduler as unknown as { pendingPersist: Promise<void> })
+        .pendingPersist;
+      updateGate.fail = null;
+      await updateCronTasks(
+        tmpDir,
+        (tasks) => tasks.filter((task) => task.id !== original.id),
+        { deletionIds: [original.id] },
+      );
       releaseDispatch();
 
       expect(await restoration).toBe(false);

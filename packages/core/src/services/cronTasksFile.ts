@@ -263,11 +263,13 @@ let updateStaleSeq = 0;
 // cleanup hook at this lifetime.
 const updateMutexes = new Map<string, Mutex>();
 
-// Per-task logical write generations let a scheduler distinguish its own
-// one-shot removal from a later same-task mutation. Keep this separate from
-// file equality: unrelated task writes share the file and must not block a
-// failed dispatch from restoring its schedule.
-const taskMutationGenerations = new Map<string, Map<string, number>>();
+// Per-task tombstones are durable because scheduled-task routes run in the
+// daemon while the scheduler that may restore a consumed one-shot runs in an
+// ACP child. Both files are read and written under the task-file lock below.
+interface CronTaskDeletionGenerations {
+  version: 1;
+  entries: Array<[string, number]>;
+}
 
 function getUpdateMutex(filePath: string): Mutex {
   let mutex = updateMutexes.get(filePath);
@@ -278,22 +280,52 @@ function getUpdateMutex(filePath: string): Mutex {
   return mutex;
 }
 
-function advanceTaskMutationGenerations(
+async function readTaskDeletionGenerations(
   filePath: string,
-  taskIds: readonly string[],
-): ReadonlyMap<string, number> {
-  let generations = taskMutationGenerations.get(filePath);
-  if (!generations) {
-    generations = new Map();
-    taskMutationGenerations.set(filePath, generations);
+): Promise<Map<string, number>> {
+  const statePath = `${filePath}.deletions`;
+  let raw: string;
+  try {
+    raw = await fs.readFile(statePath, 'utf-8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return new Map();
+    throw error;
   }
-  const advanced = new Map<string, number>();
-  for (const id of new Set(taskIds)) {
-    const generation = (generations.get(id) ?? 0) + 1;
-    generations.set(id, generation);
-    advanced.set(id, generation);
+
+  const parsed = JSON.parse(raw) as Partial<CronTaskDeletionGenerations>;
+  if (parsed.version !== 1 || !Array.isArray(parsed.entries)) {
+    throw new Error(`Invalid scheduled-task deletion state: ${statePath}`);
   }
-  return advanced;
+  const generations = new Map<string, number>();
+  for (const entry of parsed.entries) {
+    if (
+      !Array.isArray(entry) ||
+      entry.length !== 2 ||
+      typeof entry[0] !== 'string' ||
+      !Number.isSafeInteger(entry[1]) ||
+      entry[1] < 1 ||
+      generations.has(entry[0])
+    ) {
+      throw new Error(`Invalid scheduled-task deletion state: ${statePath}`);
+    }
+    generations.set(entry[0], entry[1]);
+  }
+  return generations;
+}
+
+async function writeTaskDeletionGenerations(
+  filePath: string,
+  generations: ReadonlyMap<string, number>,
+  assertCanCommit?: () => void,
+): Promise<void> {
+  const state: CronTaskDeletionGenerations = {
+    version: 1,
+    entries: [...generations],
+  };
+  await atomicWriteJSON(`${filePath}.deletions`, state, {
+    noFollow: true,
+    assertCanCommit,
+  });
 }
 
 export function getCronFilePath(projectRoot: string): string {
@@ -442,23 +474,52 @@ export async function updateCronTasks(
   mutate: (tasks: DurableCronTask[]) => DurableCronTask[],
   options: {
     assertCanCommit?: () => void;
-    mutationIds?: readonly string[];
-    onMutationGenerations?: (generations: ReadonlyMap<string, number>) => void;
+    deletionIds?: readonly string[] | (() => readonly string[]);
+    observeDeletionIds?: readonly string[];
+    onDeletionGenerations?: (generations: ReadonlyMap<string, number>) => void;
   } = {},
 ): Promise<void> {
   const filePath = getCronFilePath(projectRoot);
   return getUpdateMutex(filePath).runExclusive(async () => {
     const release = await acquireUpdateLock(filePath);
     try {
-      if (options.mutationIds?.length) {
-        const generations = advanceTaskMutationGenerations(
-          filePath,
-          options.mutationIds,
+      const observedIds = new Set(options.observeDeletionIds ?? []);
+      let generations: Map<string, number> | undefined;
+      if (observedIds.size > 0) {
+        const observedGenerations = await readTaskDeletionGenerations(filePath);
+        generations = observedGenerations;
+        options.onDeletionGenerations?.(
+          new Map(
+            [...observedIds].map((id) => [
+              id,
+              observedGenerations.get(id) ?? 0,
+            ]),
+          ),
         );
-        options.onMutationGenerations?.(generations);
       }
       const tasks = await readCronTasks(projectRoot);
       const next = mutate(tasks);
+      const deletionIds =
+        typeof options.deletionIds === 'function'
+          ? options.deletionIds()
+          : options.deletionIds;
+      if (deletionIds?.length) {
+        generations ??= await readTaskDeletionGenerations(filePath);
+        for (const id of new Set(deletionIds)) {
+          const generation = (generations.get(id) ?? 0) + 1;
+          if (!Number.isSafeInteger(generation)) {
+            throw new Error(
+              `Scheduled-task deletion generation overflow for ${id}`,
+            );
+          }
+          generations.set(id, generation);
+        }
+        await writeTaskDeletionGenerations(
+          filePath,
+          generations,
+          options.assertCanCommit,
+        );
+      }
       if (next !== tasks) {
         await writeCronTasks(projectRoot, next, options);
       }
@@ -481,17 +542,32 @@ export async function removeCronTasks(
   ids: string[],
 ): Promise<number> {
   const idSet = new Set(ids);
-  // Lock-free pre-check: a miss must be entirely side-effect free — taking
-  // the update lock would mkdir .qwen/ just to discover there is nothing
-  // to remove. The authoritative filter re-runs under the lock below.
+  // Avoid creating the tasks directory for a project with no task file. When
+  // the file exists, even a miss records the delete tombstone so an in-flight
+  // cross-process restore cannot resurrect the task.
   const current = await readCronTasks(projectRoot);
-  if (!current.some((t) => idSet.has(t.id))) return 0;
+  if (!current.some((t) => idSet.has(t.id))) {
+    try {
+      await fs.access(getCronFilePath(projectRoot));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 0;
+      throw error;
+    }
+    await updateCronTasks(projectRoot, (tasks) => tasks, {
+      deletionIds: ids,
+    });
+    return 0;
+  }
   let removed = 0;
-  await updateCronTasks(projectRoot, (tasks) => {
-    const remaining = tasks.filter((t) => !idSet.has(t.id));
-    removed = tasks.length - remaining.length;
-    return removed === 0 ? tasks : remaining;
-  });
+  await updateCronTasks(
+    projectRoot,
+    (tasks) => {
+      const remaining = tasks.filter((t) => !idSet.has(t.id));
+      removed = tasks.length - remaining.length;
+      return removed === 0 ? tasks : remaining;
+    },
+    { deletionIds: ids },
+  );
   return removed;
 }
 
