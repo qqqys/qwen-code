@@ -523,6 +523,38 @@ describe('cronTasksFile', () => {
   });
 
   describe('updateCronTasks', () => {
+    it('shares deletion generations across module instances', async () => {
+      const taskId = 'cross-process-delete';
+      await writeCronTasks(tmpDir, [makeTask({ id: taskId })]);
+      let beforeDelete: number | undefined;
+      await updateCronTasks(tmpDir, (tasks) => tasks, {
+        observeDeletionIds: [taskId],
+        onDeletionGenerations: (generations) => {
+          beforeDelete = generations.get(taskId);
+        },
+      });
+
+      vi.resetModules();
+      const { Storage: otherStorage } = await import('../config/storage.js');
+      otherStorage.setRuntimeBaseDir(tmpDir);
+      try {
+        const otherProcess = await import('./cronTasksFile.js');
+        expect(await otherProcess.removeCronTasks(tmpDir, [taskId])).toBe(1);
+      } finally {
+        otherStorage.setRuntimeBaseDir(null);
+      }
+
+      let afterDelete: number | undefined;
+      await updateCronTasks(tmpDir, (tasks) => tasks, {
+        observeDeletionIds: [taskId],
+        onDeletionGenerations: (generations) => {
+          afterDelete = generations.get(taskId);
+        },
+      });
+      expect(beforeDelete).toBe(0);
+      expect(afterDelete).toBe(1);
+    });
+
     it('applies the mutation in a single read-modify-write', async () => {
       await writeCronTasks(tmpDir, [
         makeTask({ id: 'a' }),
