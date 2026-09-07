@@ -11204,6 +11204,9 @@ class QwenAgent implements Agent {
         const session = this.sessionOrThrow(sessionId);
         const config = session.getConfig();
         const previous = config.getApprovalMode();
+        if (isRestrictedApprovalModeConfig(config)) {
+          return { previous, current: previous };
+        }
         const previousPrePlanMode =
           previous === ApprovalMode.PLAN ? config.getPrePlanMode() : undefined;
         const previousAutoModeDenialState = {

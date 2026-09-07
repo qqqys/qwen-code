@@ -12801,25 +12801,32 @@ export class Session implements SessionContext {
                   ...this.config.getAutoModeDenialState(),
                 };
                 this.config.setApprovalMode(ApprovalMode.DEFAULT);
+                const transitionRevision =
+                  this.config.getApprovalModeRevision();
                 try {
                   await this.sendCurrentModeUpdateNotification();
                 } catch (error) {
-                  try {
-                    this.config.restoreApprovalModeState({
-                      mode: previousMode,
-                      ...(previousPrePlanMode === undefined
-                        ? {}
-                        : { prePlanMode: previousPrePlanMode }),
-                    });
-                  } catch (rollbackError) {
-                    debugLogger.warn(
-                      'confirm-and-switch approval-mode rollback failed',
-                      rollbackError,
+                  if (
+                    this.config.getApprovalMode() === ApprovalMode.DEFAULT &&
+                    this.config.getApprovalModeRevision() === transitionRevision
+                  ) {
+                    try {
+                      this.config.restoreApprovalModeState({
+                        mode: previousMode,
+                        ...(previousPrePlanMode === undefined
+                          ? {}
+                          : { prePlanMode: previousPrePlanMode }),
+                      });
+                    } catch (rollbackError) {
+                      debugLogger.warn(
+                        'confirm-and-switch approval-mode rollback failed',
+                        rollbackError,
+                      );
+                    }
+                    this.config.setAutoModeDenialState(
+                      previousAutoModeDenialState,
                     );
                   }
-                  this.config.setAutoModeDenialState(
-                    previousAutoModeDenialState,
-                  );
                   throw error;
                 }
                 const modeUpdateCancellation =
@@ -12854,7 +12861,14 @@ export class Session implements SessionContext {
                 confirmationDetails.type === 'edit' &&
                 outcome === ToolConfirmationOutcome.ProceedAlways
               ) {
-                await this.sendCurrentModeUpdateNotification();
+                try {
+                  await this.sendCurrentModeUpdateNotification();
+                } catch (error) {
+                  debugLogger.debug(
+                    'edit approval mode notification failed',
+                    error,
+                  );
+                }
                 const editModeUpdateCancellation =
                   cancelBeforeExecutionIfAborted(toolName);
                 if (editModeUpdateCancellation) {
@@ -13290,25 +13304,34 @@ export class Session implements SessionContext {
               this.clearActiveTodoPlanRevision();
               this.#clearTodoStopGuardTrustAndDrainAutomaticQueues();
             }
+            const postExecutionApprovalMode = this.config.getApprovalMode();
+            const postExecutionApprovalModeRevision =
+              this.config.getApprovalModeRevision();
             try {
               await this.sendCurrentModeUpdateNotification();
             } catch (error) {
-              try {
-                this.config.restoreApprovalModeState({
-                  mode: preExecutionApprovalMode,
-                  ...(preExecutionPrePlanMode === undefined
-                    ? {}
-                    : { prePlanMode: preExecutionPrePlanMode }),
-                });
-              } catch (rollbackError) {
-                debugLogger.warn(
-                  'plan lifecycle approval-mode rollback failed',
-                  rollbackError,
+              if (
+                this.config.getApprovalMode() === postExecutionApprovalMode &&
+                this.config.getApprovalModeRevision() ===
+                  postExecutionApprovalModeRevision
+              ) {
+                try {
+                  this.config.restoreApprovalModeState({
+                    mode: preExecutionApprovalMode,
+                    ...(preExecutionPrePlanMode === undefined
+                      ? {}
+                      : { prePlanMode: preExecutionPrePlanMode }),
+                  });
+                } catch (rollbackError) {
+                  debugLogger.warn(
+                    'plan lifecycle approval-mode rollback failed',
+                    rollbackError,
+                  );
+                }
+                this.config.setAutoModeDenialState(
+                  preExecutionAutoModeDenialState,
                 );
               }
-              this.config.setAutoModeDenialState(
-                preExecutionAutoModeDenialState,
-              );
               throw error;
             }
           }

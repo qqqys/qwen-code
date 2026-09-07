@@ -27984,6 +27984,228 @@ describe('Session', () => {
       );
     });
 
+    it('executes an always-approved edit when its mode notification cannot persist', async () => {
+      let mode = ApprovalMode.DEFAULT;
+      let revision = 0;
+      const executeSpy = vi.fn().mockResolvedValue({
+        llmContent: 'ok',
+        returnDisplay: 'ok',
+      });
+      const onConfirm = vi.fn().mockImplementation(async () => {
+        mockConfig.setApprovalMode(ApprovalMode.AUTO_EDIT);
+      });
+      mockToolRegistry.getTool.mockReturnValue({
+        name: core.ToolNames.WRITE_FILE,
+        kind: core.Kind.Edit,
+        build: vi.fn().mockReturnValue({
+          params: { file_path: '/repo/file.txt', content: 'updated' },
+          getDefaultPermission: vi.fn().mockResolvedValue('ask'),
+          getConfirmationDetails: vi.fn().mockResolvedValue({
+            type: 'edit',
+            title: 'Confirm file write',
+            fileName: '/repo/file.txt',
+            fileDiff: 'diff',
+            onConfirm,
+          }),
+          getDescription: vi.fn().mockReturnValue('Write file'),
+          toolLocations: vi.fn().mockReturnValue([]),
+          execute: executeSpy,
+        }),
+      });
+      mockConfig.getApprovalMode = vi.fn(() => mode);
+      mockConfig.getApprovalModeRevision = vi.fn(() => revision);
+      mockConfig.setApprovalMode = vi.fn((nextMode) => {
+        if (nextMode !== mode) revision++;
+        mode = nextMode;
+      });
+      mockConfig.getCwd = vi.fn().mockReturnValue('/repo');
+      mockConfig.getTargetDir = vi.fn().mockReturnValue('/repo');
+      mockConfig.getDisableAllHooks = vi.fn().mockReturnValue(true);
+      mockConfig.waitForSessionApprovalModePersistence = vi
+        .fn()
+        .mockRejectedValueOnce(new Error('approval persistence failed'))
+        .mockResolvedValue(undefined);
+      vi.mocked(mockClient.requestPermission).mockResolvedValueOnce({
+        outcome: {
+          outcome: 'selected',
+          optionId: core.ToolConfirmationOutcome.ProceedAlways,
+        },
+      });
+
+      const result = await (
+        session as unknown as RunToolCallsForTest
+      ).runToolCalls(new AbortController().signal, 'prompt-edit-always', [
+        {
+          id: 'call-edit-always',
+          name: core.ToolNames.WRITE_FILE,
+          args: { file_path: '/repo/file.txt', content: 'updated' },
+        },
+      ]);
+
+      expect(onConfirm).toHaveBeenCalledWith(
+        core.ToolConfirmationOutcome.ProceedAlways,
+        { answers: undefined },
+      );
+      expect(executeSpy).toHaveBeenCalledOnce();
+      expect(result.parts[0]?.functionResponse?.response).not.toEqual(
+        expect.objectContaining({ error: expect.anything() }),
+      );
+      expect(mode).toBe(ApprovalMode.AUTO_EDIT);
+    });
+
+    it('does not roll back a later mode switch after switch-to-default persistence fails', async () => {
+      let mode = ApprovalMode.AUTO;
+      let revision = 0;
+      let rejectNotification!: (error: Error) => void;
+      const notificationPersistence = new Promise<void>((_resolve, reject) => {
+        rejectNotification = reject;
+      });
+      mockToolRegistry.getTool.mockReturnValue({
+        name: core.ToolNames.SHELL,
+        kind: core.Kind.Execute,
+        build: vi.fn().mockReturnValue({
+          params: { command: 'pwd' },
+          getDefaultPermission: vi.fn().mockResolvedValue('ask'),
+          getConfirmationDetails: vi.fn().mockResolvedValue({
+            type: 'exec',
+            title: 'Confirm shell command',
+            command: 'pwd',
+            rootCommand: 'pwd',
+            onConfirm: vi.fn().mockResolvedValue(undefined),
+          }),
+          getDescription: vi.fn().mockReturnValue('Run shell command'),
+          toolLocations: vi.fn().mockReturnValue([]),
+          execute: vi.fn(),
+        }),
+      });
+      mockConfig.getApprovalMode = vi.fn(() => mode);
+      mockConfig.getApprovalModeRevision = vi.fn(() => revision);
+      mockConfig.setApprovalMode = vi.fn((nextMode) => {
+        if (nextMode !== mode) revision++;
+        mode = nextMode;
+      });
+      mockConfig.restoreApprovalModeState = vi.fn((payload) => {
+        if (payload.mode !== mode) revision++;
+        mode = payload.mode;
+      });
+      mockConfig.getCwd = vi.fn().mockReturnValue('/repo');
+      mockConfig.getTargetDir = vi.fn().mockReturnValue('/repo');
+      mockConfig.getDisableAllHooks = vi.fn().mockReturnValue(true);
+      mockConfig.getAutoModeSettings = vi.fn().mockReturnValue({});
+      mockConfig.getBaseLlmClient = vi.fn().mockReturnValue({
+        generateJson: vi.fn().mockRejectedValue(new Error('classifier down')),
+      });
+      mockConfig.getLlmClient = vi.fn().mockReturnValue({
+        ...mockLlmClient,
+        getHistoryTail: vi.fn().mockReturnValue([]),
+      });
+      mockConfig.waitForSessionApprovalModePersistence = vi
+        .fn()
+        .mockReturnValueOnce(notificationPersistence)
+        .mockResolvedValue(undefined);
+      vi.mocked(mockClient.requestPermission).mockResolvedValueOnce({
+        outcome: {
+          outcome: 'selected',
+          optionId: core.ToolConfirmationOutcome.ProceedOnceAndSwitchToDefault,
+        },
+      });
+
+      const run = (session as unknown as RunToolCallsForTest).runToolCalls(
+        new AbortController().signal,
+        'prompt-switch-superseded',
+        [
+          {
+            id: 'call-switch-superseded',
+            name: core.ToolNames.SHELL,
+            args: { command: 'pwd' },
+          },
+        ],
+      );
+      await vi.waitFor(() =>
+        expect(
+          mockConfig.waitForSessionApprovalModePersistence,
+        ).toHaveBeenCalledOnce(),
+      );
+      await session.setMode({
+        sessionId: 'test-session-id',
+        modeId: 'yolo',
+      });
+      rejectNotification(new Error('default snapshot failed'));
+      await run;
+
+      expect(mode).toBe(ApprovalMode.YOLO);
+      expect(mockConfig.restoreApprovalModeState).not.toHaveBeenCalled();
+    });
+
+    it('does not roll back a later mode switch after plan-mode persistence fails', async () => {
+      let mode = ApprovalMode.DEFAULT;
+      let revision = 0;
+      let rejectNotification!: (error: Error) => void;
+      const notificationPersistence = new Promise<void>((_resolve, reject) => {
+        rejectNotification = reject;
+      });
+      const executeSpy = vi.fn().mockImplementation(async () => {
+        mockConfig.setApprovalMode(ApprovalMode.PLAN);
+        return { llmContent: 'entered', returnDisplay: 'entered' };
+      });
+      mockToolRegistry.getTool.mockReturnValue({
+        name: core.ToolNames.ENTER_PLAN_MODE,
+        kind: core.Kind.Think,
+        build: vi.fn().mockReturnValue({
+          params: {},
+          getDefaultPermission: vi.fn().mockResolvedValue('allow'),
+          getConfirmationDetails: vi.fn(),
+          getDescription: vi.fn().mockReturnValue('Enter plan mode'),
+          toolLocations: vi.fn().mockReturnValue([]),
+          execute: executeSpy,
+        }),
+      });
+      mockConfig.getApprovalMode = vi.fn(() => mode);
+      mockConfig.getApprovalModeRevision = vi.fn(() => revision);
+      mockConfig.setApprovalMode = vi.fn((nextMode) => {
+        if (nextMode !== mode) revision++;
+        mode = nextMode;
+      });
+      mockConfig.restoreApprovalModeState = vi.fn((payload) => {
+        if (payload.mode !== mode) revision++;
+        mode = payload.mode;
+      });
+      mockConfig.getPermissionManager = vi.fn().mockReturnValue(null);
+      mockConfig.getDisableAllHooks = vi.fn().mockReturnValue(true);
+      mockConfig.waitForSessionApprovalModePersistence = vi
+        .fn()
+        .mockResolvedValueOnce(undefined)
+        .mockReturnValueOnce(notificationPersistence)
+        .mockResolvedValue(undefined);
+
+      const run = (session as unknown as RunToolCallsForTest).runToolCalls(
+        new AbortController().signal,
+        'prompt-plan-superseded',
+        [
+          {
+            id: 'call-plan-superseded',
+            name: core.ToolNames.ENTER_PLAN_MODE,
+            args: {},
+          },
+        ],
+      );
+      await vi.waitFor(() =>
+        expect(
+          mockConfig.waitForSessionApprovalModePersistence,
+        ).toHaveBeenCalledTimes(2),
+      );
+      await session.setMode({
+        sessionId: 'test-session-id',
+        modeId: 'yolo',
+      });
+      rejectNotification(new Error('plan snapshot failed'));
+      await run;
+
+      expect(executeSpy).toHaveBeenCalledOnce();
+      expect(mode).toBe(ApprovalMode.YOLO);
+      expect(mockConfig.restoreApprovalModeState).not.toHaveBeenCalled();
+    });
+
     it('rechecks a revision-bound plan exit after pre-tool hooks', async () => {
       enableSessionWorkflowRevisionContext();
       mockConfig.getApprovalMode = vi.fn().mockReturnValue(ApprovalMode.PLAN);

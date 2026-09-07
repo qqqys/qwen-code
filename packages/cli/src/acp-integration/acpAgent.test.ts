@@ -1080,6 +1080,7 @@ import {
   SESSION_ARTIFACT_PERSISTENCE_VERSION,
   mcpServerRequiresOAuth,
   APPROVAL_MODES,
+  ApprovalMode,
   ToolNames,
   GoalPersistenceUnavailableError,
   GoalConflictError,
@@ -4303,9 +4304,17 @@ describe('QwenAgent MCP SSE/HTTP support', () => {
     async (_label, safeMode, bareMode) => {
       const innerConfig = makeInnerConfig();
       const restoreApprovalModeState = vi.fn();
+      let approvalMode = ApprovalMode.DEFAULT;
+      let approvalModeRevision = 0;
       Object.assign(innerConfig, {
         isSafeMode: vi.fn().mockReturnValue(safeMode),
         getBareMode: vi.fn().mockReturnValue(bareMode),
+        getApprovalMode: vi.fn(() => approvalMode),
+        getApprovalModeRevision: vi.fn(() => approvalModeRevision),
+        setApprovalMode: vi.fn((mode: ApprovalMode) => {
+          if (mode !== approvalMode) approvalModeRevision++;
+          approvalMode = mode;
+        }),
         restoreApprovalModeState,
       });
       vi.mocked(loadCliConfig).mockResolvedValue(
@@ -4315,6 +4324,7 @@ describe('QwenAgent MCP SSE/HTTP support', () => {
         (sessionId: string) =>
           ({
             getId: vi.fn().mockReturnValue(sessionId),
+            getConfig: vi.fn().mockReturnValue(innerConfig),
             shouldHintAskUserQuestionRestore: vi.fn().mockReturnValue(false),
             sendAvailableCommandsUpdate: vi.fn().mockResolvedValue(undefined),
             replayHistory: vi.fn().mockResolvedValue(undefined),
@@ -4341,8 +4351,14 @@ describe('QwenAgent MCP SSE/HTTP support', () => {
           mcpServers: [],
           _meta: { [SESSION_APPROVAL_MODE_META_KEY]: 'yolo' },
         });
+        await agent.extMethod(SERVE_CONTROL_EXT_METHODS.sessionApprovalMode, {
+          sessionId: response.sessionId,
+          mode: ApprovalMode.YOLO,
+        });
 
         expect(restoreApprovalModeState).not.toHaveBeenCalled();
+        expect(innerConfig.setApprovalMode).not.toHaveBeenCalled();
+        expect(approvalMode).toBe(ApprovalMode.DEFAULT);
         expect(response).toEqual(
           expect.objectContaining({
             modes: expect.objectContaining({ currentModeId: 'default' }),

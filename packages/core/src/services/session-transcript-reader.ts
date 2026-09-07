@@ -2755,7 +2755,9 @@ export class SessionTranscriptReader {
     const sessionApprovalModeUuid = lastUuidMatching(
       index,
       (entry) =>
-        entry.type === 'system' && entry.subtype === 'session_approval_mode',
+        !entry.inherited &&
+        entry.type === 'system' &&
+        entry.subtype === 'session_approval_mode',
     );
     // The legacy-model fallback reads the last assistant record's `model`.
     // Without an explicit selection it is only dispatched when it happens to

@@ -1682,6 +1682,60 @@ describe('SessionTranscriptReader', () => {
     });
   });
 
+  it('does not restore an inherited session approval mode', async () => {
+    await writeRecords([
+      {
+        ...record('mode-1', null, ''),
+        type: 'system',
+        subtype: 'session_approval_mode',
+        message: undefined,
+        systemPayload: { mode: ApprovalMode.YOLO },
+        forkedFrom: {
+          sessionId: 'source-session',
+          messageUuid: 'source-mode-1',
+        },
+      },
+    ]);
+
+    const projection = await new SessionTranscriptReader(
+      workspaceDir,
+    ).readRestoreProjection(sessionId, { replay: { kind: 'none' } });
+
+    expect(projection?.runtime.recording.sessionApprovalMode).toBeUndefined();
+  });
+
+  it('restores an own approval mode after an inherited record', async () => {
+    await writeRecords([
+      {
+        ...record('mode-1', null, ''),
+        type: 'system',
+        subtype: 'session_approval_mode',
+        message: undefined,
+        systemPayload: { mode: ApprovalMode.YOLO },
+        forkedFrom: {
+          sessionId: 'source-session',
+          messageUuid: 'source-mode-1',
+        },
+      },
+      {
+        ...record('mode-2', 'mode-1', ''),
+        type: 'system',
+        subtype: 'session_approval_mode',
+        message: undefined,
+        systemPayload: { mode: ApprovalMode.AUTO_EDIT },
+      },
+    ]);
+
+    const projection = await new SessionTranscriptReader(
+      workspaceDir,
+    ).readRestoreProjection(sessionId, { replay: { kind: 'none' } });
+
+    expect(projection?.runtime.recording.sessionApprovalMode).toEqual({
+      kind: 'valid',
+      payload: { mode: ApprovalMode.AUTO_EDIT },
+    });
+  });
+
   it('does not fall back to an older privileged mode after an invalid record', async () => {
     await writeRecords([
       {
