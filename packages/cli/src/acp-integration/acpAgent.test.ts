@@ -4307,15 +4307,16 @@ describe('QwenAgent MCP SSE/HTTP support', () => {
       const restoreApprovalModeState = vi.fn();
       let approvalMode = ApprovalMode.DEFAULT;
       let approvalModeRevision = 0;
+      const setApprovalMode = vi.fn((mode: ApprovalMode) => {
+        if (mode !== approvalMode) approvalModeRevision++;
+        approvalMode = mode;
+      });
       Object.assign(innerConfig, {
         isSafeMode: vi.fn().mockReturnValue(safeMode),
         getBareMode: vi.fn().mockReturnValue(bareMode),
         getApprovalMode: vi.fn(() => approvalMode),
         getApprovalModeRevision: vi.fn(() => approvalModeRevision),
-        setApprovalMode: vi.fn((mode: ApprovalMode) => {
-          if (mode !== approvalMode) approvalModeRevision++;
-          approvalMode = mode;
-        }),
+        setApprovalMode,
         restoreApprovalModeState,
       });
       vi.mocked(loadCliConfig).mockResolvedValue(
@@ -4353,12 +4354,12 @@ describe('QwenAgent MCP SSE/HTTP support', () => {
           _meta: { [SESSION_APPROVAL_MODE_META_KEY]: 'yolo' },
         });
         await agent.extMethod(SERVE_CONTROL_EXT_METHODS.sessionApprovalMode, {
-          sessionId: response.sessionId,
+          sessionId: 'test-session-id',
           mode: ApprovalMode.YOLO,
         });
 
         expect(restoreApprovalModeState).not.toHaveBeenCalled();
-        expect(innerConfig.setApprovalMode).not.toHaveBeenCalled();
+        expect(setApprovalMode).not.toHaveBeenCalled();
         expect(approvalMode).toBe(ApprovalMode.DEFAULT);
         expect(response).toEqual(
           expect.objectContaining({
