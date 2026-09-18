@@ -345,7 +345,7 @@ describe('Goal verifier evidence window', () => {
     };
     expanded.message = {
       parts: [
-        ...expanded.message!.parts,
+        ...(expanded.message?.parts ?? []),
         {
           text: '<qwen:user-prompt-submit-context>\nadditional context\n</qwen:user-prompt-submit-context>',
         },
