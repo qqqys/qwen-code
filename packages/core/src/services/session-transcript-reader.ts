@@ -1623,7 +1623,7 @@ function estimateIndexCacheBytes(index: TranscriptIndex): number {
   for (const [uuid, entry] of index.byUuid) {
     total +=
       INDEX_ENTRY_BASE_BYTES +
-      INDEX_HINT_BASE_BYTES * 2 +
+      INDEX_HINT_BASE_BYTES +
       INDEX_MAP_ENTRY_BYTES +
       INDEX_CONTAINER_BASE_BYTES +
       entry.segments.length * INDEX_CONTAINER_SLOT_BYTES +

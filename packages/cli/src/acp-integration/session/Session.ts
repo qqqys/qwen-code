@@ -596,7 +596,7 @@ type RunToolResult = {
   /**
    * A tool in this batch asked to end the turn once its result is recorded.
    * Mirrors `ToolResult.terminateTurn`, which today only `update_goal` sets
-   * when verification or evidence checkpointing needs a turn boundary.
+   * when verification needs a turn boundary.
    */
   terminateTurn?: boolean;
 };
@@ -8710,7 +8710,7 @@ export class Session implements SessionContext {
    * Ends a Goal turn whose tool batch asked for it, mirroring the interactive
    * and headless paths.
    *
-   * `update_goal` sets the flag when verification or evidence checkpointing
+   * `update_goal` sets the flag when verification
    * needs a turn boundary. Feeding a queued proposal back to the model leaves
    * it parked: the objective is already satisfied, so the model has nothing
    * left to do but call the Goal tools again, and the runtime rejects every

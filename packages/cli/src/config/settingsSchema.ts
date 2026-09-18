@@ -1698,7 +1698,7 @@ const SETTINGS_SCHEMA = {
         requiresRestart: false,
         default: undefined as number | undefined,
         description:
-          'Autonomous spend window armed on each new Goal, in tokens as counted by the Goal meter (totalTokenCount summed over Goal-turn model calls, direct foreground subagents, and Goal verifier/checkpoint checks; nested/background agents, other side queries, cron and notification turns are excluded). When a Goal spends its window it gets one wind-down turn to hand off, then stops until you resume it, which arms another window. Unset uses the built-in default of 30,000,000; -1 means unlimited. Zero, values above 300,000,000 (10x the default, a typo guard), other negative, fractional, or non-number values are rejected at startup.',
+          'Autonomous spend window armed on each new Goal, in tokens as counted by the Goal meter (totalTokenCount summed over Goal-turn model calls, direct foreground subagents, and Goal verifier checks; nested/background agents, other side queries, cron and notification turns are excluded). When a Goal spends its window it gets one wind-down turn to hand off, then stops until you resume it, which arms another window. Unset uses the built-in default of 30,000,000; -1 means unlimited. Zero, values above 300,000,000 (10x the default, a typo guard), other negative, fractional, or non-number values are rejected at startup.',
         showInDialog: false,
       },
       goalMaxTurns: {
@@ -1736,7 +1736,7 @@ const SETTINGS_SCHEMA = {
         minimum: 1,
         maximum: 900,
         description:
-          'Deprecated. Goals no longer run evidence-checkpoint model calls, because the verifier reads the transcript directly, so this value is ignored. The key is still accepted so that existing settings files keep loading without an unknown-key warning.',
+          'Deprecated. Goals no longer run evidence-checkpoint model calls, because the verifier reads the transcript directly, so this value is ignored. The key is still declared so that /config keeps refusing a value that was never valid.',
         showInDialog: false,
       },
       maxToolCalls: {

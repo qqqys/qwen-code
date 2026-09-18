@@ -182,8 +182,8 @@ export class GetGoalTool extends BaseDeclarativeTool<
    * later `get_goal` answered `{ active: false }` — the run's own turn count,
    * elapsed time and stop reason became unreadable at exactly the moment
    * someone wanted them. The runtime still holds that record and reading it
-   * needs no permit, so report it. Scalars only: the objective and the
-   * evidence checkpoint stay behind the permit.
+   * needs no permit, so report it. Scalars only: the objective stays behind
+   * the permit.
    */
   private lastGoal(): LastGoalSummary | undefined {
     let runtime: GoalRuntime;

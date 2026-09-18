@@ -34,8 +34,7 @@ export const VERIFIER_EVIDENCE_WINDOW_MIN_BYTES =
 export type GoalEvidenceProvenance =
   | 'real_user'
   | 'assistant_output'
-  | 'tool_result'
-  | 'goal_checkpoint';
+  | 'tool_result';
 
 type GoalRecordProvenance =
   | GoalEvidenceProvenance
@@ -104,10 +103,7 @@ export type EvidenceSourceUnavailableCode =
   | 'cursor_unset'
   | 'cursor_not_found'
   | 'duplicate_record_uuid'
-  | 'permit_goal_mismatch'
-  | 'malformed_turn_context'
-  | 'turn_reentry'
-  | 'current_turn_not_tail';
+  | 'permit_goal_mismatch';
 
 export class EvidenceSourceUnavailableError extends Error {
   constructor(
@@ -292,7 +288,7 @@ function legacySafeProvenance(
 /**
  * Cut `value` to at most `limit` UTF-8 bytes without splitting a code point.
  */
-export function capPreviewBytes(value: string, limit: number): string {
+function capPreviewBytes(value: string, limit: number): string {
   if (Buffer.byteLength(value, 'utf8') <= limit) {
     return value;
   }

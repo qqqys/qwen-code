@@ -992,6 +992,39 @@ describe('goal reducer', () => {
     }
   });
 
+  it('accepts the legacy keys whatever they hold, since nothing reads them', () => {
+    // Values the old validator would have refused: a negative streak, an
+    // empty failure, a checkpoint that does not match the cursor, an empty
+    // pending check. Rejecting the record for any of them would cost a
+    // resumed session its Goal over fields that are dropped anyway.
+    const payload = legacyCheckpointPayload({
+      cause: 'turn_finished',
+      checkpointPending: {},
+    });
+    const goal = (payload['snapshot'] as { goal: Record<string, unknown> })
+      .goal;
+    goal['checkpointStalls'] = -1;
+    goal['lastCheckpointFailure'] = '';
+    goal['evidenceCheckpoint'] = {
+      checkpointId: 'does-not-match-the-cursor',
+      createdAt: 42,
+      claims: [],
+    };
+
+    const parsed = parseGoalStateRecordPayloadV2(payload);
+
+    expect(parsed).toBeDefined();
+    expect(parsed!.snapshot.goal).toMatchObject({ goalId: 'g-1' });
+    for (const key of [
+      'evidenceCheckpoint',
+      'checkpointStalls',
+      'lastCheckpointFailure',
+    ]) {
+      expect(parsed!.snapshot.goal).not.toHaveProperty(key);
+    }
+    expect(parsed).not.toHaveProperty('checkpointPending');
+  });
+
   it('still rejects a key it has never known', () => {
     expect(
       parseGoalStateRecordPayloadV2(legacyCheckpointPayload({ extra: true })),

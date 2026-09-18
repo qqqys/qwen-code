@@ -1306,6 +1306,60 @@ describe('goal runtime', () => {
     },
   );
 
+  it.each(['pause', 'dispose'] as const)(
+    'aborts an in-flight verification on %s',
+    async (action) => {
+      // The abort is what cuts the verifier's streamed side-model call short;
+      // without it a /goal pause or a disposed session would leave a model
+      // request running to its timeout.
+      const journal = fakeGoalJournal();
+      let records: readonly RuntimeRecord[] = [];
+      const evidenceSource = fakeEvidenceSource(() => records);
+      let capturedSignal: AbortSignal | undefined;
+      const verifier: GoalVerifier = vi.fn(
+        (_input, signal) =>
+          new Promise<never>((_resolve, reject) => {
+            capturedSignal = signal;
+            signal?.addEventListener('abort', () => reject(signal.reason), {
+              once: true,
+            });
+          }),
+      );
+      const host = fakeGoalTurnHost();
+      const runtime = createGoalRuntime({ journal, evidenceSource, verifier });
+      runtime.bindHost(host);
+      await runtime.dispatch({ action: 'create', objective: 'deliver result' });
+      const permit = host.started[0];
+      records = verifierEvidenceRecords(
+        permit,
+        runtime.getSnapshot().goal!.evidenceCursor.recordId!,
+      );
+      runtime.recordTerminalProposal(permit, {
+        status: 'complete',
+        reason: 'Delivered',
+      });
+      const finishing = runtime.finishTurn(permit);
+      await vi.waitFor(() => expect(capturedSignal).toBeDefined());
+      expect(capturedSignal!.aborted).toBe(false);
+
+      if (action === 'pause') {
+        await runtime.dispatch({
+          action: 'pause',
+          expectedGoalId: permit.goalId,
+          expectedRevision: permit.revision,
+        });
+      } else {
+        runtime.dispose();
+      }
+
+      expect(capturedSignal!.aborted).toBe(true);
+      await finishing;
+      if (action === 'pause') {
+        expect(runtime.getSnapshot().goal).toMatchObject({ status: 'paused' });
+      }
+    },
+  );
+
   it('leaves a blocked proposal to the verifier instead of refusing it on a coverage rule', async () => {
     const journal = fakeGoalJournal();
     let records: readonly RuntimeRecord[] = [];
@@ -1554,6 +1608,9 @@ describe('goal runtime', () => {
         limitKind,
       });
       expect(host.started).toHaveLength(0);
+      // The transcript has moved on since the stop; the fresh window starts
+      // at its tail, not at the record the old Goal was anchored to.
+      journal.records.push(legacyRecord('tail-record', { v: 2 }));
 
       await runtime.dispatch({
         action: 'resume',
@@ -1564,7 +1621,7 @@ describe('goal runtime', () => {
       const resumed = runtime.getSnapshot().goal!;
       expect(resumed.status).toBe('active');
       expect(resumed.limitKind).toBeUndefined();
-      expect(resumed.evidenceCursor.recordId).not.toBe('checkpoint-record');
+      expect(resumed.evidenceCursor.recordId).toBe('tail-record');
       expect(host.started).toHaveLength(1);
     },
   );

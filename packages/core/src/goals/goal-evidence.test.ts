@@ -31,6 +31,7 @@ interface RecordOptions {
   thought?: string;
   toolResponse?: Record<string, unknown>;
   goalContext?: unknown;
+  systemPayload?: unknown;
 }
 
 function record(
@@ -70,6 +71,9 @@ function record(
       : { provenance: options.provenance }),
     ...(goalContext === undefined ? {} : { goalContext }),
     ...(parts.length === 0 ? {} : { message: { parts } }),
+    ...(options.systemPayload === undefined
+      ? {}
+      : { systemPayload: options.systemPayload }),
   };
 }
 
@@ -321,6 +325,92 @@ describe('Goal verifier evidence window', () => {
     expect(
       code(() => build([], 256_000, { ...permit(), revision: REVISION + 1 })),
     ).toBe('permit_goal_mismatch');
+  });
+
+  it("sends the user's own words, not the expanded prompt the model was given", () => {
+    // A user-prompt record pairs the text the user typed (displayText) with
+    // the expanded @file body and hook context the model received. The
+    // verifier gets the former: it is proof of what the user said, and the
+    // rest would let a hook's text pass as user input.
+    const expanded = {
+      ...record('typed', 'user', {
+        turnId: 'turn-3',
+        provenance: 'real_user',
+        text: 'raw @file prompt\n\nEXPANDED_FILE_BODY',
+        systemPayload: {
+          displayText: 'raw @file prompt',
+          hookContext: 'additional context',
+        },
+      }),
+    };
+    expanded.message = {
+      parts: [
+        ...expanded.message!.parts,
+        {
+          text: '<qwen:user-prompt-submit-context>\nadditional context\n</qwen:user-prompt-submit-context>',
+        },
+      ],
+    };
+    const midTurn = record('steer', 'user', {
+      turnId: 'turn-3',
+      provenance: 'real_user',
+      subtype: 'mid_turn_user_message',
+      text: 'use the second option',
+    });
+
+    const window = build([expanded, midTurn]);
+
+    expect(window.evidence.map((entry) => [entry.uuid, entry.content])).toEqual(
+      [
+        ['steer', 'use the second option'],
+        ['typed', 'raw @file prompt'],
+      ],
+    );
+    expect(JSON.stringify(window)).not.toContain('EXPANDED_FILE_BODY');
+    expect(JSON.stringify(window)).not.toContain('user-prompt-submit-context');
+  });
+
+  it('admits a record only when its provenance agrees with its type, and its Goal context is well formed', () => {
+    const window = build([
+      record('forged-user-as-assistant', 'user', {
+        turnId: 'turn-3',
+        provenance: 'assistant_output',
+        text: 'I am not the assistant',
+      }),
+      record('forged-assistant-as-tool', 'assistant', {
+        turnId: 'turn-3',
+        provenance: 'tool_result',
+        text: 'not a tool result',
+      }),
+      record('blank-turnid', 'tool_result', {
+        goalContext: { goalId: GOAL_ID, revision: REVISION, turnId: '' },
+        toolResponse: { output: 'x' },
+      }),
+      record('extra-key', 'tool_result', {
+        goalContext: {
+          goalId: GOAL_ID,
+          revision: REVISION,
+          turnId: 'turn-3',
+          extra: true,
+        },
+        toolResponse: { output: 'x' },
+      }),
+      tool('legit-tool', 'turn-3', 'ok'),
+    ]);
+
+    expect(window.evidence.map((entry) => entry.uuid)).toEqual(['legit-tool']);
+    expect(window.omitted).toBe(0);
+  });
+
+  it('skips a record with nothing visible in it, and does not count it as left out', () => {
+    const window = build([
+      record('blank', 'assistant', { turnId: 'turn-3', text: '   ' }),
+      record('blank-newline', 'assistant', { turnId: 'turn-3', text: '\n' }),
+      tool('real', 'turn-3', 'ok'),
+    ]);
+
+    expect(window.evidence.map((entry) => entry.uuid)).toEqual(['real']);
+    expect(window.omitted).toBe(0);
   });
 
   it('does not require the current turn to have recorded anything, or to be the newest turn', () => {

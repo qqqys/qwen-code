@@ -61,7 +61,7 @@ export interface GoalRecord {
   activeTimeMs: number;
   /**
    * Model tokens billed to Goal turns, direct foreground subagents, and the
-   * Goal's verifier and checkpoint checks. Nested/background agents, other side
+   * Goal's verifier checks. Nested/background agents, other side
    * queries, cron and notification turns are excluded. Optional because an older daemon sends a snapshot
    * without it.
    */

@@ -1314,7 +1314,7 @@ describe('SessionTranscriptReader', () => {
       message: undefined,
       systemPayload: { customTitle: 'Restored', titleSource: 'manual' },
     };
-    await writeRecords([
+    const filePath = await writeRecords([
       source,
       firstUser,
       firstAssistant,
@@ -1332,6 +1332,11 @@ describe('SessionTranscriptReader', () => {
     const service = new SessionService(workspaceDir, {
       runtimeBaseDir: runtimeDir,
     });
+    // A concurrent load and projection share one transcript index build.
+    let buildCount = 0;
+    setSessionTranscriptIndexBuildCompleteHookForTest((builtPath) => {
+      if (builtPath === filePath) buildCount += 1;
+    });
     const [loaded, projection] = await Promise.all([
       service.loadSession(sessionId),
       service.readRestoreProjection(sessionId, {
@@ -1339,6 +1344,7 @@ describe('SessionTranscriptReader', () => {
       }),
     ]);
 
+    expect(buildCount).toBe(1);
     expect(loaded).toBeDefined();
     expect(projection).toBeDefined();
     expect(projection?.replay).toBeUndefined();
