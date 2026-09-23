@@ -299,6 +299,27 @@ describe('useTrajectoryWindow', () => {
       expect(loadPage).toHaveBeenCalledTimes(4);
     });
 
+    it('stops at a cursor it has already followed rather than folding a page twice', async () => {
+      const loadPage = chain({
+        '': page([userText('newest', 'rec-2')], {
+          hasMore: true,
+          nextCursor: 'c1',
+        }),
+        // A daemon that fails to advance hands the same cursor back.
+        c1: page([userText('older', 'rec-1')], {
+          hasMore: true,
+          nextCursor: 'c1',
+        }),
+      });
+      const view = render(loadPage);
+      await act(async () => {});
+
+      expect(loadPage).toHaveBeenCalledTimes(2);
+      expect(promptTexts(view.latest())).toEqual(['older', 'newest']);
+      expect(view.latest().truncated).toBe(true);
+      expect(view.latest().status).toBe('ready');
+    });
+
     it('keeps the newer pages when an older one cannot be read', async () => {
       const loadPage = chain({
         '': page([userText('newest', 'rec-3')], {

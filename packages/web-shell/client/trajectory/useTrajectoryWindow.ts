@@ -216,9 +216,19 @@ export function useTrajectoryWindow(
       let cursor = newest.page.nextCursor;
       let more = newest.page.hasMore;
       let olderFailure: TrajectoryWindowFailure | undefined;
+      // A cursor handed out twice would fold the same records in twice and
+      // silently double every total. The walk stops at it instead, leaving
+      // the rest of history unloaded — which `truncated` then says.
+      const seenCursors = new Set<string>();
       setState((previous) => ({ ...previous, loadedPages: 1 }));
 
-      while (more && cursor !== undefined && collected.length < maxPages) {
+      while (
+        more &&
+        cursor !== undefined &&
+        !seenCursors.has(cursor) &&
+        collected.length < maxPages
+      ) {
+        seenCursors.add(cursor);
         const older = await readPage(loadPage, { limit: pageSize, cursor });
         if (!current()) return;
         if (!older.ok) {
