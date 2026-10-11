@@ -1,0 +1,27 @@
+{
+  "sourceCommit": "0dc4f92318d01c6319da24be63eecb79e0a4004e",
+  "baseCommit": "e6ed740eb16438e7f08ea8c64beb9940206f305d",
+  "fixtureNotice": "Real local host and browser; Vitest fixture reports and loopback fake model.",
+  "files": {
+    "acceptance.md": {
+      "bytes": 4946,
+      "sha256": "97acf57f2fc23c03cb3fbb5d45166bfc5c34a397ca7ca37019edb1c55f52e351"
+    },
+    "after-desktop-1440x900.png": {
+      "bytes": 176416,
+      "sha256": "fba5c999cac0d368e499768f1b52c196577b23e6a737aee48cb7d3656bf7bf70"
+    },
+    "after-mobile-390x844.png": {
+      "bytes": 66290,
+      "sha256": "be22eeefeb8891374e8485484cf09bb53ef62b4983885df8fb41e4a3ce6226d6"
+    },
+    "before-desktop-1440x900.png": {
+      "bytes": 70703,
+      "sha256": "44b061aa090d2d7de59924dae3c8ef5dcf9a180f3c2b9f089a6d50622d06dc8f"
+    },
+    "before-mobile-390x844.png": {
+      "bytes": 39429,
+      "sha256": "71dc31d7375803ca6622f2bf140cea1bbeef3d5632f4cb62b78d605bb372df53"
+    }
+  }
+}
