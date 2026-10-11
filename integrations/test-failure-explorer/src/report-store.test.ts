@@ -16,9 +16,10 @@ import {
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
-import { MAX_SOURCE_BYTES } from './contracts.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { MAX_SNAPSHOT_BYTES, MAX_SOURCE_BYTES } from './contracts.js';
 import { ReportStore } from './report-store.js';
+import { parseVitestReport } from './vitest-report.js';
 
 const roots: string[] = [];
 async function workspace(): Promise<string> {
@@ -189,7 +190,7 @@ describe('workspace report snapshots', () => {
     },
   );
 
-  it('rejects snapshot expansion beyond the cache bound before creating cache', async () => {
+  it('rejects snapshot expansion before checksum serialization or cache creation', async () => {
     const root = await workspace();
     const data = JSON.parse(
       await readFile(
@@ -198,17 +199,90 @@ describe('workspace report snapshots', () => {
       ),
     );
     const file = data.testResults[0];
-    file.name = 'p'.repeat(10_000);
-    file.assertionResults = Array.from(
-      { length: 3_000 },
-      () => file.assertionResults[0],
-    );
+    file.name = 'p'.repeat(30_000);
+    file.assertionResults = Array.from({ length: 20_000 }, () => ({
+      ancestorTitles: [],
+      fullName: 'a',
+      title: 'a',
+      status: 'passed',
+      failureMessages: [],
+    }));
     data.testResults = [file];
     await writeFile(join(root, 'report.json'), JSON.stringify(data));
-    await expect(
-      (await ReportStore.create(root)).importReport('report.json'),
-    ).rejects.toMatchObject({ code: 'REPORT_TOO_LARGE' });
+    const stringify = JSON.stringify;
+    const guard = vi.spyOn(JSON, 'stringify').mockImplementation((value) => {
+      if (
+        value !== null &&
+        typeof value === 'object' &&
+        'schemaVersion' in value
+      ) {
+        throw new Error('Oversized snapshot reached full serialization');
+      }
+      return stringify(value);
+    });
+    try {
+      await expect(
+        (await ReportStore.create(root)).importReport('report.json'),
+      ).rejects.toMatchObject({ code: 'REPORT_TOO_LARGE' });
+    } finally {
+      guard.mockRestore();
+    }
     expect(await readdir(root)).toEqual(['report.json']);
+  });
+
+  it('keeps the exact UTF-8 JSON snapshot limit including escapes and metadata', async () => {
+    const root = await workspace();
+    const data = JSON.parse(
+      await readFile(
+        new URL('../test-fixtures/mixed.json', import.meta.url),
+        'utf8',
+      ),
+    );
+    const file = data.testResults[0];
+    file.assertionResults = Array.from({ length: 100 }, () => ({
+      ancestorTitles: [],
+      fullName: 'a',
+      title: 'a',
+      status: 'passed',
+      failureMessages: [],
+    }));
+    data.testResults = [file];
+    await writeFile(join(root, 'report.json'), JSON.stringify(data));
+    const store = await ReportStore.create(root);
+    const baseline = await store.importReport('report.json');
+    file.name = '\u4e2d\ud83d\udca1"\\\u0000\ud800' + 'p'.repeat(200_000);
+    const messages = file.assertionResults[0].failureMessages;
+    const snapshotBytes = () =>
+      Buffer.byteLength(
+        JSON.stringify({
+          ...baseline,
+          ...parseVitestReport(data),
+          source: {
+            ...baseline.source,
+            bytes: Buffer.byteLength(JSON.stringify(data)),
+          },
+        }),
+      );
+    for (let pass = 0; pass < 3; pass++) {
+      const gap = MAX_SNAPSHOT_BYTES - snapshotBytes();
+      const diagnostic = messages[0] ?? '';
+      messages[0] =
+        gap >= 0 ? diagnostic + 'x'.repeat(gap) : diagnostic.slice(0, gap);
+    }
+    expect(snapshotBytes()).toBe(MAX_SNAPSHOT_BYTES);
+    await writeFile(join(root, 'report.json'), JSON.stringify(data));
+    const exact = await store.importReport('report.json');
+    expect(Buffer.byteLength(JSON.stringify(exact))).toBe(MAX_SNAPSHOT_BYTES);
+    expect(await store.load(exact.reportId)).toEqual(exact);
+    messages[0] += 'x';
+    expect(snapshotBytes()).toBe(MAX_SNAPSHOT_BYTES + 1);
+    await writeFile(join(root, 'report.json'), JSON.stringify(data));
+    await expect(store.importReport('report.json')).rejects.toMatchObject({
+      code: 'REPORT_TOO_LARGE',
+    });
+    expect(
+      (await readdir(join(root, '.qwen/test-failure-explorer/reports'))).sort(),
+    ).toEqual([`${baseline.reportId}.json`, `${exact.reportId}.json`].sort());
   });
 
   it('rejects a symlinked cache and never writes outside the workspace', async () => {

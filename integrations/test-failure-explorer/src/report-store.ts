@@ -38,6 +38,37 @@ function checksum(snapshot: ReportSnapshot): string {
   return digest(JSON.stringify(body));
 }
 
+function checkSnapshotSize(snapshot: ReportSnapshot): void {
+  let bytes = 0;
+  const add = (count: number) => {
+    bytes += count;
+    if (bytes > MAX_SNAPSHOT_BYTES)
+      throw new ExplorerError(
+        'REPORT_TOO_LARGE',
+        'Normalized snapshot exceeds the byte limit.',
+      );
+  };
+  const visit = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      add(2 + Math.max(0, value.length - 1));
+      for (const entry of value) visit(entry);
+    } else if (value !== null && typeof value === 'object') {
+      const entries = Object.entries(value).filter(
+        ([, entry]) => entry !== undefined,
+      );
+      add(2 + Math.max(0, entries.length - 1));
+      for (const [key, entry] of entries) {
+        add(Buffer.byteLength(JSON.stringify(key)) + 1);
+        visit(entry);
+      }
+    } else {
+      add(Buffer.byteLength(JSON.stringify(value)));
+    }
+  };
+  // Count repeated source strings before allocating a complete JSON snapshot.
+  visit(snapshot);
+}
+
 async function readBounded(
   path: string,
   max: number,
@@ -265,13 +296,9 @@ export class ReportStore {
       importedAt: new Date().toISOString(),
       snapshotChecksum: '0'.repeat(64),
     });
+    checkSnapshotSize(snapshot);
     snapshot.snapshotChecksum = checksum(snapshot);
     const serialized = JSON.stringify(snapshot);
-    if (Buffer.byteLength(serialized) > MAX_SNAPSHOT_BYTES)
-      throw new ExplorerError(
-        'REPORT_TOO_LARGE',
-        'Normalized snapshot exceeds the byte limit.',
-      );
     signal?.throwIfAborted();
     let temporary: string | undefined;
     try {
