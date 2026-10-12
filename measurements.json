@@ -1,0 +1,63 @@
+{
+  "status": "VERIFIED_FIXED",
+  "results": [
+    {
+      "width": 900,
+      "detailHeight": 156.703125,
+      "text": {
+        "content": "SYNTHETIC workspace-a diagnostic 00",
+        "visible": {
+          "x": 433.375,
+          "y": 495.6875,
+          "width": 231.796875,
+          "height": 12.5
+        },
+        "uncovered": true
+      },
+      "listHeight": 228.1015625,
+      "visibleRows": 4,
+      "allHits": true,
+      "realEntryClick": true,
+      "checkboxClick": true,
+      "listPaginationRoundTrip": true,
+      "textareaFocus": true,
+      "iframeHeight": 640,
+      "cardHeight": 640,
+      "cardScrollHeight": 776,
+      "footerScrollTop": 136,
+      "detailsOpen": 2,
+      "selected": 1
+    },
+    {
+      "width": 320,
+      "detailHeight": 151.6015625,
+      "text": {
+        "content": "SYNTHETIC workspace-a diagnostic 00",
+        "visible": {
+          "x": 12,
+          "y": 475.7265625,
+          "width": 231.796875,
+          "height": 12.5
+        },
+        "uncovered": true
+      },
+      "listHeight": 228.1015625,
+      "visibleRows": 4,
+      "allHits": true,
+      "realEntryClick": true,
+      "checkboxClick": true,
+      "listPaginationRoundTrip": true,
+      "textareaFocus": true,
+      "iframeHeight": 640,
+      "cardHeight": 640,
+      "cardScrollHeight": 915,
+      "footerScrollTop": 275.5,
+      "detailsOpen": 2,
+      "selected": 1
+    }
+  ],
+  "fixtureSha256": "446b63a7eca6c6ef6c2f7fae94c77e6d94c056885eafeb31d82bceb0f2a1747f",
+  "baselineCommit": "32d2b434a641f31d68cb712f03174f551277531b",
+  "fixedCommit": "96707ab9889e866fbbfd3f460fb6d4d3817f66dd",
+  "theme": "before: light; after: actual host dark; no CSS injected"
+}

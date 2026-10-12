@@ -1,0 +1,90 @@
+{
+  "pullRequest": "https://github.com/QwenLM/qwen-code/pull/13916",
+  "baselineCommit": "32d2b434a641f31d68cb712f03174f551277531b",
+  "fixedCommit": "96707ab9889e866fbbfd3f460fb6d4d3817f66dd",
+  "fixtureSha256": "446b63a7eca6c6ef6c2f7fae94c77e6d94c056885eafeb31d82bceb0f2a1747f",
+  "files": [
+    {
+      "name": "acceptance.md",
+      "sha256": "f62a5d8758b06c606de0736f6b68885fe1bace9a839258b47a30ed694445cadb",
+      "bytes": 5624
+    },
+    {
+      "name": "after-320-detail-card.png",
+      "sha256": "012ab95f72636314638ed5667383dd219fa842f5645d984a9056c1198eb161c5",
+      "bytes": 65292,
+      "dimensions": [
+        335,
+        641
+      ]
+    },
+    {
+      "name": "after-320-footer-card.png",
+      "sha256": "78eae31436f99d3f4090f4b3c82f9ad2ffa836b9e5a9da2dab62876e89b243f1",
+      "bytes": 67776,
+      "dimensions": [
+        335,
+        641
+      ]
+    },
+    {
+      "name": "after-320-list-card.png",
+      "sha256": "678ec56a5b4b7d5fde523213f727b573428ac01e4f3c7e4635f54fd2855e8d88",
+      "bytes": 73263,
+      "dimensions": [
+        335,
+        641
+      ]
+    },
+    {
+      "name": "after-900-detail-card.png",
+      "sha256": "cd84e624c8e0d9a3a644471c2972ebdd052c14236a71860d5beeb1568ce83086",
+      "bytes": 104671,
+      "dimensions": [
+        915,
+        641
+      ]
+    },
+    {
+      "name": "after-900-footer-card.png",
+      "sha256": "ea133603d4c0c8ce6734e892c615c2d28a4ab42c08f9674c14d8446e576cd659",
+      "bytes": 100775,
+      "dimensions": [
+        915,
+        641
+      ]
+    },
+    {
+      "name": "before-320-detail-card.png",
+      "sha256": "63d5ce380801d851c407886fe4e2dee0a982ecdcf32cea810dbf615f47fcfa50",
+      "bytes": 76757,
+      "dimensions": [
+        335,
+        641
+      ]
+    },
+    {
+      "name": "before-320-list-card.png",
+      "sha256": "a5936beec871860b97678e208fc21fa573c0010f31e57a883aedb8b49a930b41",
+      "bytes": 75156,
+      "dimensions": [
+        335,
+        641
+      ]
+    },
+    {
+      "name": "before-900-detail-card.png",
+      "sha256": "2a8260d1e18094d43703cc63aac42d6baaf5f227fced4535c6e4f7ff5101f3d9",
+      "bytes": 108955,
+      "dimensions": [
+        915,
+        641
+      ]
+    },
+    {
+      "name": "measurements.json",
+      "sha256": "1dae981fce36f7e6a019827278eac44cc9ae557142d73cea54537342a5c58f8e",
+      "bytes": 1689
+    }
+  ]
+}
