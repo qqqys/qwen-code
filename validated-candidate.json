@@ -1,0 +1,41 @@
+{
+  "recordedAt": "2026-10-12T07:48:35.193153+00:00",
+  "base": "30582105fecd0d1159f4d2b894adbeadcd1cef30",
+  "branch": "feat/test-failure-explorer-pr3a",
+  "state": "uncommitted local candidate-003",
+  "source": {
+    "integrations/test-failure-explorer/src/app/App.test.tsx": "9e5c66614241fb843ed18c5abcbcc7049fefed0e92634c1aeb4386c46df631be",
+    "integrations/test-failure-explorer/src/app/App.tsx": "eabae7447bba18fc5030503bb4332e393eea87bf4b80d3f27974660f1dabf887",
+    "integrations/test-failure-explorer/src/app/analysis-request.test.ts": "e0def9f378c8b4b91d68165795686e78b76ce457618343bf22cd4932928b9a1b",
+    "integrations/test-failure-explorer/src/app/analysis-request.ts": "f3e2ac63b9bf9e0d213a6e433cca208bc7e2ee28968df08eb622edda3b204617",
+    "integrations/test-failure-explorer/src/app/main.test.tsx": "ee4aa0a741b20c562d14509673ce1f2bdf7a39f8616dae2c8203138e5db4a2e2",
+    "integrations/test-failure-explorer/src/app/main.tsx": "97128e0b3588e335460ee66c3d67920bc7eb83ff92c2e011b0ce2d9ff49a07a3",
+    "integrations/test-failure-explorer/src/app/styles.css": "51e97977699e144a3b1d4f2c07dae2ae9295f6ad441772524f4636b3c467e1fa",
+    "packages/sdk-typescript/src/daemon/DaemonSessionClient.ts": "2d2c373b6fcb11df6bf639a76edac03e0ef14581743220bc8c93012916b04cc8",
+    "packages/sdk-typescript/test/unit/DaemonSessionClient.test.ts": "7eb039e0a3ab33dbf4aab57e76631bfbd99013cdeeb3874c404065e59ff80b28",
+    "packages/vscode-ide-companion/src/webview/EmbeddedApp.test.tsx": "e593a376821766258547970eb7b9a031e43d989d75d69899fa68e4cdebc7802e",
+    "packages/vscode-ide-companion/src/webview/EmbeddedApp.tsx": "a1f6dbad5680f270fef15c58222ec2058c9b3f78251d0c9b463b46268d991646",
+    "packages/web-shell/client/App.test.tsx": "cd9e6b89437d788e96858e72f4d55862b3b200d8ea5bfd0cb2013563b6a34c00",
+    "packages/web-shell/client/App.tsx": "535ee4f0ba11a6382f0070bbdff350070de19a121788bcdb54634401dbfa6eda",
+    "packages/web-shell/client/components/messages/McpApp.dom.test.tsx": "164bf792cf1853ea69687b624fa8ac0114520310bde16febf4b189ea80b51159",
+    "packages/web-shell/client/components/messages/McpApp.tsx": "3e8940ab869f45f2e7ab78cbbeb71b456a5b76e7e429322863a8540ca4366685",
+    "packages/web-shell/client/customization.tsx": "91367f4ae8d08f7735c35cc6267c7b4aa0a7caf9b18b53a29b146a765a1ae539",
+    "packages/web-shell/client/daemon/session/actions.test.ts": "5cadc50e854bb04849e26ebd9e02dcdbd70ba5148544ad53ca87f8d9e58bd47e",
+    "packages/web-shell/client/daemon/session/actions.ts": "cb99d5b9ad2a5866715c9f8d256823b060a7ca8ce52cd4e6bc6b62ed930c0e20",
+    "packages/web-shell/client/daemon/session/types.ts": "b48959c5b15a504dfc949a52a80662e10efdca744c9547bd55859c0de1a1caab",
+    "packages/web-shell/client/hooks/useMcpAppMessages.test.tsx": "bdbee055ffa51cc3536803d9b3ca65082d2d6eec65f8a5abc0fb40734f294ea7",
+    "packages/web-shell/client/hooks/useMcpAppMessages.tsx": "fc97d16415d30fbd3293960320ec005fe55aed2d9fca51da6c0333f17739a2b4",
+    "packages/web-shell/client/i18n.tsx": "d80dffd972cb8124739aa1a2768cfe44de555e85b04ed2941e7e61a740149508",
+    "packages/web-shell/client/mcpAppHostContext.ts": "f4bd42bf2a6fe8715f305299182674096546fb91caeaa8d8006326bc44c778c8"
+  },
+  "artifacts": {
+    "dist/cli.js": "dbcdf2b00af8fb780a940ca96476f09882288a88c28e3403fc0d0eac8779268d",
+    "packages/sdk-typescript/dist/daemon/index.js": "ebc346939396b61440be265bc691527da07539d6d58d7e71c4d2e569773e376e",
+    "packages/web-shell/dist/index.js": "42de569926d7635c53d85908c6c312f6998e93859de99486b455d7896f1699cf",
+    "integrations/test-failure-explorer/dist/main.js": "05e3c3b9e2fbceefa23443bd83892c424868c705af43723876f9b072c9e859e7",
+    "integrations/test-failure-explorer/dist/app.html": "c454f924fe5423b730c5708b7dad7febabe16fca15b1562add03452cb54816da",
+    "dist/web-shell/assets/index-DEl3ZVvm.js": "5a31851abe6a6925c52719195e4ff4d17431faaed113b8a118db7e7365240b8b",
+    "dist/web-shell/assets/index-Dgq7fSnD.js": "8bf7074846f08d40b2b8e554e248e87ced52c17f09f40e97fe20c998a241f09f",
+    "dist/web-shell/assets/index-DohPy72Z.js": "9212953d6262027d24b3d1909d78f5a11847fda0a8440436d22d80ddba8d1275"
+  }
+}

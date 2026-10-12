@@ -1,0 +1,27 @@
+{
+  "at": "2026-10-12T08:02:47.282949+00:00",
+  "checks": {
+    "cancelledRecoveryHasNoSecondPost": true,
+    "samePageFreshUsesRecoveredClient": true,
+    "samePageFreshRealReceiptAndAccepted": true,
+    "successSettlesWhileModelHeld": true,
+    "unknownOneActualWriteAndNoRetry": true,
+    "unknownHasNoGenericFailedToast": true,
+    "cancelClosesWithZeroWrites": true,
+    "draftPreserved": true,
+    "composerStillSelfHeals": true,
+    "lateOldRecoveryNoSecondPostAfterOwnerSwitch": true,
+    "newBOwnerWorksAndADraftPreserved": true,
+    "acceptedSurvivesIframeTeardown": true,
+    "acceptedRpcSuccessBeforeTeardown": true,
+    "finalHashesMatch": true
+  },
+  "passed": true,
+  "counts": {
+    "forwarded": 11,
+    "promptPosts": 8,
+    "realPromptReceipts": 5,
+    "invalidClientPosts": 3,
+    "midTurnPosts": 0
+  }
+}

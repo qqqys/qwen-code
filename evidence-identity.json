@@ -1,0 +1,31 @@
+{
+  "productCommit": "1070d92dacb9f742ec9e6007440e591fc4646a17",
+  "validatedBase": "30582105fecd0d1159f4d2b894adbeadcd1cef30",
+  "validatedManifestSha256": "a3fb75e61ba2fb3948f5a0cc2583968ec22cd622a8f2b5eb34daa217621b8924",
+  "currentMainAtPublication": "e9b87acd73cd170971970633e20e189814bbe4c1",
+  "mergeTreeCheck": "clean; product not rebased",
+  "beforeSourceCommit": "96707ab9889e866fbbfd3f460fb6d4d3817f66dd",
+  "beforeSourcePR": "https://github.com/QwenLM/qwen-code/pull/13916",
+  "images": {
+    "before-pr2-copy-900px.png": {
+      "width": 915,
+      "height": 641,
+      "sha256": "ea133603d4c0c8ce6734e892c615c2d28a4ab42c08f9674c14d8446e576cd659"
+    },
+    "after-review-1280x900.png": {
+      "width": 1280,
+      "height": 900,
+      "sha256": "3431a34c9c651d044ad777f9d2bcfb7de4b085e232bad79ecb9d028e336ef6f2"
+    },
+    "after-accepted-1440x1000.png": {
+      "width": 1440,
+      "height": 1000,
+      "sha256": "5dd08219000d0290b68d8e8dde763c2d1b00439f20f21d0baf134e062235bd2f"
+    },
+    "after-unknown-390x844.png": {
+      "width": 390,
+      "height": 844,
+      "sha256": "b91a1d3dc18a51a1e9a40f04413a8cb225a3bb1e4519f8c9476e718ec1777855"
+    }
+  }
+}
