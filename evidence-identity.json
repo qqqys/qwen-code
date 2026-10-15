@@ -1,0 +1,88 @@
+{
+  "recordedAt": "2026-10-15T07:01:04.556011+00:00",
+  "productCommit": "1f78bfa8bd6e7b1226309d457d01947c30f4a7be",
+  "mainBase": "c1b012539bd860e9e7d679b7c1738bc01fc41b97",
+  "candidateSourceDigest": "0b2c1e05598f54025cb347d6da700fd0b54bdf599585ca27f35f5dbb5f2da90f",
+  "fixture": {
+    "kind": "derived report with deterministic loopback model",
+    "bytes": 65775,
+    "sha256": "201aa871006ae466222b8199dd2ef75762f85ddc98a54eae73a29a95d4934bb1"
+  },
+  "mainHostBuildArtifacts": {
+    "dist/cli.js": {
+      "bytes": 13802,
+      "sha256": "9e4bf2dd48a57cd3f87287dacec8513cc61e8f320a7d2b1b34a476f0e284f362"
+    },
+    "packages/web-shell/dist/index.js": {
+      "bytes": 3400722,
+      "sha256": "f1171a1b410a907be90b7672d971a0a5b2765726a8b9a52fcd4a93cd85e96b53"
+    },
+    "packages/web-shell/dist/transcript.js": {
+      "bytes": 3764251,
+      "sha256": "f132c39e4128e5e250bccfbda91890d5e0ff87189cbd44aea15c0a7c5e474e8b"
+    },
+    "integrations/test-failure-explorer/dist/main.js": {
+      "bytes": 1112217,
+      "sha256": "e9366c3f42f98edc6b53c60dd8fe8b6e913d7eca94af405330ea1b6e3c026624"
+    },
+    "integrations/test-failure-explorer/dist/app.html": {
+      "bytes": 599233,
+      "sha256": "c089c96a8d2622115b682d6f5ddeae3d95eefc97e8b9689658ee17bfe75898ae"
+    }
+  },
+  "servedHostJavascript": {
+    "name": "index-BV5X_Ldb.js",
+    "sha256": "f8d48cde0d248d2e0fed79484c917fedb159ea8ec50f59bd0553c2067ef4c356"
+  },
+  "capture": {
+    "before": "Extension built from exact main base, including exact root TypeScript config",
+    "after": "Candidate extension with identical accepted source hashes",
+    "sameHostAssets": true,
+    "cardTopY": 52.796875,
+    "pixelsEdited": false,
+    "visuallyInspected": true,
+    "appAndOuterHorizontalOverflow": false
+  },
+  "files": {
+    "acceptance.md": {
+      "bytes": 9876,
+      "sha256": "18e33d803f56fb42bffc43b2893aab559068a280b02b86bdd3963dbd9dd19d14"
+    },
+    "after-generated-desktop.png": {
+      "bytes": 122266,
+      "sha256": "ecd3b7a7951c6df04f0f9e62c73d74f73e5e4cd18257aaf94b278c0e1275b5e4",
+      "width": 1440,
+      "height": 900
+    },
+    "after-generated-narrow.png": {
+      "bytes": 77089,
+      "sha256": "507f54054d6141e26cd00899b80331a2e86a9c7dc4defe1751af6d79dc6eda10",
+      "width": 390,
+      "height": 844
+    },
+    "before-fixed-desktop.png": {
+      "bytes": 141565,
+      "sha256": "0ade7f6f440069ae580743a64f152d8faec0da6cafb14e19850ba8e0ba2f87fb",
+      "width": 1440,
+      "height": 900
+    },
+    "before-fixed-narrow.png": {
+      "bytes": 84045,
+      "sha256": "77e9c3f1a7d439ea055a350d9bb41f7a894c1a81c31b75adf99b6af7d3203878",
+      "width": 390,
+      "height": 844
+    },
+    "daemon-summary.json": {
+      "bytes": 1857,
+      "sha256": "a50b4ef26001c9421eb70acadb010f88e66a8a29239f4a03f33763e50acb6b07"
+    },
+    "model-pilot-summary.json": {
+      "bytes": 3133,
+      "sha256": "6c6c3042072b9c90795bc976ddeecb332ca96cfa0252f3938a2c46646720c910"
+    },
+    "source-identity.json": {
+      "bytes": 2504,
+      "sha256": "0a44dc0d7b5783a06f635421b108f48a9da89174ce36fb433be89febd81d0c6c"
+    }
+  }
+}

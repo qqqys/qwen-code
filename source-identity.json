@@ -1,0 +1,27 @@
+{
+  "recordedAt": "2026-10-14T08:36:44.518981+00:00",
+  "base": "c1b012539bd860e9e7d679b7c1738bc01fc41b97",
+  "baselineIntegrationTree": "e8c752e156d32ecd808db66048bf55c18d182877",
+  "remoteMainIntegrationTree": "e8c752e156d32ecd808db66048bf55c18d182877",
+  "files": {
+    "integrations/test-failure-explorer/README.md": "3685e3c2911b4fbc9d1057d21e53593f215974b61822ef8b0e3a1e7f0924616b",
+    "integrations/test-failure-explorer/skills/test-failure-explorer/SKILL.md": "889399a03f607124988507d9aa8c4a0cfefabf1f1f209ab2eb144dac7937b0a4",
+    "integrations/test-failure-explorer/src/app-contract.test.ts": "3dd6b082829bacd49a64642096b5bbc47446fb8cef49b1d9af0324582714dc48",
+    "integrations/test-failure-explorer/src/app-contract.ts": "6afb0966e53a49c1db4d75840b0c5cead5f9434faee8437dd22b71aea96e9ec9",
+    "integrations/test-failure-explorer/src/app/App.test.tsx": "5441674e00c0ae7756b186eb176d77611f4b4104f8a471895f83ad70a8bb1412",
+    "integrations/test-failure-explorer/src/app/App.tsx": "7e844c6db9b625f2e538ac9ea5e42d82d389ad07074920f9a84606edaaaf02d7",
+    "integrations/test-failure-explorer/src/app/main.test.tsx": "9012d7939ee9f3d52745e04ba406399b3e010ce8b05b761260e03393dd2f1dc0",
+    "integrations/test-failure-explorer/src/app/main.tsx": "f022a566436f850778230bde17f22d53d84396d6ba8d82c5327316af89135d39",
+    "integrations/test-failure-explorer/src/app/styles.css": "5d8433c08b27e2f0e7f89d2c67756003787fd7627b0609787f810be49387ff98",
+    "integrations/test-failure-explorer/src/mcp.integration.test.ts": "f5f0843be333238c0790146921567a5880c884f2f5991b7f77f2aebf49da06a1",
+    "integrations/test-failure-explorer/src/mcp.ts": "207f1e998b6080f204ae50829300b890355a4a1f0feefeba7e161adc957285ba",
+    "integrations/test-failure-explorer/src/report-query.test.ts": "3608a2f0128df2a5e1f0554b8956dc6579f0f0f3cf005fb5246457349135c56a",
+    "integrations/test-failure-explorer/src/report-query.ts": "48c8571d88a6b811cb0ffa26f4ddd15cde95a02639f2651eb8652152d6d3ff50",
+    "integrations/test-failure-explorer/src/view-spec.test.ts": "938bf0049d682d9b59103a133cc51c1486c4e3f2532fc9ac6a69eeb6a4022096",
+    "integrations/test-failure-explorer/src/view-spec.ts": "a6d13a6769a25a31f309280d5bdc7864d5942b5ade6821241a164f2e51ccae96"
+  },
+  "candidateDigest": "0b2c1e05598f54025cb347d6da700fd0b54bdf599585ca27f35f5dbb5f2da90f",
+  "reverifiedAt": "2026-10-15T06:30:36.127466+00:00",
+  "productCommit": "1f78bfa8bd6e7b1226309d457d01947c30f4a7be",
+  "verifiedAfterCommitAt": "2026-10-15T06:59:44.767874+00:00"
+}

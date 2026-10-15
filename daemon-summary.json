@@ -1,0 +1,52 @@
+{
+  "status": "PASS",
+  "mainBase": "c1b012539bd860e9e7d679b7c1738bc01fc41b97",
+  "testWindowUtc": {
+    "start": "2026-10-15T06:36:52.994Z",
+    "end": "2026-10-15T06:55:14.265332+00:00"
+  },
+  "fixtureNotice": "Frozen derived report and deterministic loopback model; real CLI daemon, packed MCP extension, AppBridge and sandbox. No real model quality or human efficiency claim.",
+  "cases": {
+    "P3-01": "PASS",
+    "P3-04": "PASS",
+    "P3-05": "PASS",
+    "P3-06": "PASS",
+    "P3-08": "PASS",
+    "P3-10": "PASS",
+    "P3-11": "PASS",
+    "PR3a-review": "PASS"
+  },
+  "packedCallCount": 20,
+  "maxToolResultChars": 17764,
+  "failurePages": [
+    25,
+    25,
+    7
+  ],
+  "uniqueFailures": 57,
+  "reviewCancelPosts": 0,
+  "reviewAcceptPosts": 1,
+  "reviewAcceptHttp": 202,
+  "reviewTerminal": "completed",
+  "externalBrowserRequestCount": 0,
+  "baselineCorrectedConsoleErrors": 0,
+  "candidateConsoleErrors": 0,
+  "consumerLastPageConsoleErrors": 0,
+  "sameHostAssets": true,
+  "cleanupAllStopped": true,
+  "screenshotsVisuallyInspected": true,
+  "productCommit": "1f78bfa8bd6e7b1226309d457d01947c30f4a7be",
+  "identityChecks": {
+    "recordedAt": "2026-10-15T06:57:08.362603+00:00",
+    "head": "c1b012539bd860e9e7d679b7c1738bc01fc41b97",
+    "sourceFilesEqual": true,
+    "sourceDiffSha256": "05367be87e7b66b0a9365028b435da128996a3644feff2e6258e2d51e45646f6",
+    "keyArtifactsEqual": true,
+    "cliJavaScriptEqual": true,
+    "sourceDiffEqual": true,
+    "baselineSourceFilesChecked": 51,
+    "baselineSourceDifferences": [],
+    "baselineRootConfigExact": true
+  },
+  "baselineHarnessCorrection": "The first temporary baseline archive omitted root tsconfig.json and rendered with React is not defined. Exact base root config was restored, temporary baseline rebuilt, and the corrected baseline passed. Initial failure records retained locally."
+}
