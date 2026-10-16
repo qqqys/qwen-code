@@ -1,0 +1,118 @@
+{
+  "sourceBase": "87de74860b73eb6ffd6c1f4dd09b86fcfdc65edb",
+  "sourceHead": "1ca1bc1818e58367c09e1ec1f58ad49815b04ae6",
+  "beforeCliSha256": "346282f48cc5b82d4482a93c483f4021271634d085f700cac40e5fd7371f2d8e",
+  "afterCliSha256": "dc2390e83ec7d5fe12ef8ccc21742aa2c9fa9a6a20737d94d87cae86c3238ef8",
+  "beforeArtifactDigest": "860f93184fe0ba0e0ee0e500c5f8eafce58f10893d32ef35f825be94ade5ce14",
+  "afterArtifactDigest": "18f6080eb1808698defde23df2701404b8ccebd13d9561e69d891f1c0d37e811",
+  "artifactFiles": {
+    "before": 682,
+    "after": 683
+  },
+  "platform": "macOS, Node24.14.1, Ink140x40",
+  "provider": "deterministic loopback mock, isolated fixture HOME/QWEN_HOME/runtime",
+  "checks": [
+    {
+      "id": "E01.1",
+      "description": "completion root-only absent before, visible after",
+      "pass": true
+    },
+    {
+      "id": "E01.2",
+      "description": "actual shared slash result user before, nearest ancestor after",
+      "pass": true
+    },
+    {
+      "id": "E01.3",
+      "description": "root-only unknown before, completed after",
+      "pass": true
+    },
+    {
+      "id": "E01.4",
+      "description": "fresh name lookup selects newly added target",
+      "pass": true
+    },
+    {
+      "id": "E01.5",
+      "description": "cached ancestor slash cannot run after trust revocation",
+      "pass": true
+    },
+    {
+      "id": "E02.1",
+      "description": "before root absent; after exact complete root/nearest/user/target markers",
+      "pass": true
+    },
+    {
+      "id": "E02.2",
+      "description": "JSON args survive the real model/tool execution chain",
+      "pass": true
+    },
+    {
+      "id": "E02.3",
+      "description": "explicit trusted ancestor path returns exact root marker",
+      "pass": true
+    },
+    {
+      "id": "E02.4",
+      "description": "outside path is refused without sentinel content leakage",
+      "pass": true
+    },
+    {
+      "id": "E02.5",
+      "description": "workflow subagent actual pwd stays at session target",
+      "pass": true
+    },
+    {
+      "id": "E02.6",
+      "description": "generated inline path remains executable",
+      "pass": true
+    },
+    {
+      "id": "E02.7",
+      "description": "denied ancestor name/path never returns root marker",
+      "pass": true
+    },
+    {
+      "id": "E02.8",
+      "description": "all real headless CLI turns settle successfully",
+      "pass": true
+    },
+    {
+      "id": "E03.1",
+      "description": "ACP list/detail use target, not different process cwd",
+      "pass": true
+    },
+    {
+      "id": "E04.1",
+      "description": "default approval first/repeat/same-bytes/new-bytes counts",
+      "pass": true
+    },
+    {
+      "id": "E04.2",
+      "description": "approval run markers reflect same bytes and changed bytes",
+      "pass": true
+    },
+    {
+      "id": "E03.2",
+      "description": "long ACP session trust changes observed on next call",
+      "pass": true
+    },
+    {
+      "id": "E04.3",
+      "description": "real TUI save writes current target and leaves ancestors unchanged",
+      "pass": true
+    },
+    {
+      "id": "E05.1",
+      "description": "real daemon two-workspace negative and target/user execution before/after",
+      "pass": true
+    }
+  ],
+  "boundaries": [
+    "No Windows/Linux filesystem E2E",
+    "No real remote model/provider coverage",
+    "No hosted CI or merge acceptance claim",
+    "Save-before uses the selected user workflow; save-after uses the newly available ancestor workflow. Both write the current target.",
+    "TUI PNGs are faithful raster renders of actual PTY xterm cells, not desktop screenshots."
+  ]
+}
