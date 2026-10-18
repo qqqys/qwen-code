@@ -1,0 +1,30 @@
+{
+  "head": "553945bd02dd93826acdeb40dbdc0c80baa7bb18",
+  "upstream": "193e3652900c598f568e8444286a7a09549921f1",
+  "files": {
+    "docs/users/common-workflow.md": "6c545cd01dc1f8b65cbd10f1545f446b13dc5063b549333f39114cffd47a2548",
+    "integration-tests/cli/workflow-ancestor-discovery.test.ts": "fe35f853386e904607d60e1898fbb3d04e5d8a04e8c1ed9ef7edeaa17719fa7a",
+    "package.json": "88531bb22452ca973cfbbea3314835d72560daff1e292a2efb36e00ff5a117df",
+    "packages/cli/src/acp-integration/acpAgent.test.ts": "fb543614756bf55326d4f260b7cd2139cd63f6ee6d01d778c29417fd79292b5a",
+    "packages/cli/src/acp-integration/acpAgent.ts": "6937ade121d5cd2c7d4df0a6d6fbd2449f7688e5f7df390ce5295f9adc20a292",
+    "packages/cli/src/acp-integration/acpAgent.worktree.test.ts": "44be8aa28d4a733bf04ae39bc49c77232003678df576e19b0cd071a976882965",
+    "packages/cli/src/config/config.test.ts": "653a942cb998e45fc5c15cec617772c944a9ee6e7c5ea74cbe9917e1353ecf3b",
+    "packages/cli/src/config/config.ts": "afdc09f3a1b82319f77c6825f713104093b856f43010488db45d1908496bfb9c",
+    "packages/cli/src/config/settings.ts": "16b7e6dc821fc0b3b826f2f0d375a1c8caf89f29312cfac4796b44d61e22d5b6",
+    "packages/cli/src/config/trustedFolders.ts": "409115fe087fd9eb0e6e2df059f8f1cc9f8d69c6013ca73219107fcc50239f0e",
+    "packages/cli/src/config/workflow-ancestor-trust.test.ts": "bd018f9d6939a27fffe209901955efcad47e7d7eafad5dc8db86e7266994ec94",
+    "packages/cli/src/llm.test.tsx": "01907f9cbdeff39d9ae1d7cc8dacdbb3e1f49fa6f93bc0fcf30caad893631fc2",
+    "packages/cli/src/llm.tsx": "74a984810315234c93889e3f1ff992e2f6653c7c66a73e56023a23b36c1b81f0",
+    "packages/cli/src/services/saved-workflow-loader.test.ts": "61dab0111fe12ece7dda8207d1a23b2491108d7b1bd15e56700bbc214cf62180",
+    "packages/core/src/agents/runtime/workflow-ancestors.test.ts": "e2c7052ed0fc028216e968d148974341cc9349ea62eeb453380796aa9de87212",
+    "packages/core/src/agents/runtime/workflow-ancestors.ts": "52d2914f5457e0833a931bf1d0a5a2579076b3176a56b73ec331eef01b45e8f9",
+    "packages/core/src/agents/runtime/workflow-saved.test.ts": "487dc7477b477348b0c62ae1715a5b1140bbbd6aa39cabc8ca4de1a2a116e144",
+    "packages/core/src/agents/runtime/workflow-saved.ts": "1febf221d369086dd85657554dfc2d1e87c9a968a79e896704444b31ffef8350",
+    "packages/core/src/config/config.ts": "ecbd99f176ac37da65d98abfb7fcc7d0e3f989a44d42f41b366b582f9e5c3c3c",
+    "packages/core/src/config/config.workflows.test.ts": "566b92af2a4d47768aa0274fbd165ac01ab07323210c0c5ddc0161130c2ed4b0",
+    "packages/core/src/skills/bundled/workflow-authoring/SKILL.md": "b0fb6b662f3c61d63b789ba256440266f118c84d72443ab69204d1029fb39146",
+    "packages/core/src/skills/bundled/workflow-creator/SKILL.md": "d6fc99924c94118c192b332763905562c0aaf26d43d6e5c1dc98e9a2fa862faf",
+    "packages/core/src/tools/workflow/workflow.ts": "7bf90c25f68c00c55c9d4590eadd91514b6a6edd574c86686fc6340df41c841c",
+    "scripts/tests/no-ak-integration-ci.test.js": "e674bd023f099d9efdf267a3a2b36ec59b2c61edc50699496b2b1bbcccbe433d"
+  }
+}

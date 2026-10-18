@@ -1,0 +1,103 @@
+{
+  "capturedAt": "2026-10-18T06:29:34.853Z",
+  "base": "/Users/qqqys/.codex/worktrees/62f1/qwen-code/.qwen/e2e-tests/dw-01",
+  "after": "/Users/qqqys/.codex/worktrees/62f1/qwen-code/.qwen/pr-reviews/PR-14369/repair-2026-10-18/test-engineer/postfix-final-553945bd",
+  "pass": true,
+  "checks": [
+    {
+      "id": "E01.1",
+      "description": "completion root-only absent before, visible after",
+      "pass": true
+    },
+    {
+      "id": "E01.2",
+      "description": "actual shared slash result user before, nearest ancestor after",
+      "pass": true
+    },
+    {
+      "id": "E01.3",
+      "description": "root-only unknown before, completed after",
+      "pass": true
+    },
+    {
+      "id": "E01.4",
+      "description": "fresh name lookup selects newly added target",
+      "pass": true
+    },
+    {
+      "id": "E01.5",
+      "description": "cached ancestor slash cannot run after trust revocation",
+      "pass": true
+    },
+    {
+      "id": "E02.1",
+      "description": "before root absent; after exact complete root/nearest/user/target markers",
+      "pass": true
+    },
+    {
+      "id": "E02.2",
+      "description": "JSON args survive the real model/tool execution chain",
+      "pass": true
+    },
+    {
+      "id": "E02.3",
+      "description": "explicit trusted ancestor path returns exact root marker",
+      "pass": true
+    },
+    {
+      "id": "E02.4",
+      "description": "outside path is refused without sentinel content leakage",
+      "pass": true
+    },
+    {
+      "id": "E02.5",
+      "description": "workflow subagent actual pwd stays at session target",
+      "pass": true
+    },
+    {
+      "id": "E02.6",
+      "description": "generated inline path remains executable",
+      "pass": true
+    },
+    {
+      "id": "E02.7",
+      "description": "denied ancestor name/path never returns root marker",
+      "pass": true
+    },
+    {
+      "id": "E02.8",
+      "description": "all real headless CLI turns settle successfully",
+      "pass": true
+    },
+    {
+      "id": "E03.1",
+      "description": "ACP list/detail use target, not different process cwd",
+      "pass": true
+    },
+    {
+      "id": "E04.1",
+      "description": "default approval first/repeat/same-bytes/new-bytes counts",
+      "pass": true
+    },
+    {
+      "id": "E04.2",
+      "description": "approval run markers reflect same bytes and changed bytes",
+      "pass": true
+    },
+    {
+      "id": "E03.2",
+      "description": "long ACP session trust changes observed on next call",
+      "pass": true
+    },
+    {
+      "id": "E04.3",
+      "description": "real TUI save writes current target and leaves ancestors unchanged",
+      "pass": true
+    },
+    {
+      "id": "E05.1",
+      "description": "real daemon two-workspace negative and target/user execution before/after",
+      "pass": true
+    }
+  ]
+}

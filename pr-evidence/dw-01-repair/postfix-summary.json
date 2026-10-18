@@ -1,0 +1,221 @@
+{
+  "status": "independent_local_behavior_and_artifact_verification_pass",
+  "generatedAt": "2026-10-18T06:30:56.117756+00:00",
+  "testedHead": "553945bd02dd93826acdeb40dbdc0c80baa7bb18",
+  "testedUpstream": "193e3652900c598f568e8444286a7a09549921f1",
+  "baselineHead": "1ca1bc1818e58367c09e1ec1f58ad49815b04ae6",
+  "cliSha256": "ada257f3c1dacbc5ffaf6480bcaa09eff42eaffaa9531bb63f8b55d5a5f5949d",
+  "runtimeFileCount": 1446,
+  "runtimeAggregateSha256": "af82a7db968b3bd1033b123e1c0100e8323b69a410dac23f391e861bbda63f61",
+  "sourceFileCount": 24,
+  "sourceAndRuntimeBeforePass": true,
+  "sourceAndRuntimeAfterPass": true,
+  "sourceAndRuntimeMismatchesBeforeAfter": 0,
+  "priorityAssertionsPassed": 10,
+  "priorityAssertionsTotal": 10,
+  "originalAssertionsPassed": 19,
+  "originalAssertionsTotal": 19,
+  "all29Pass": true,
+  "priorityAssertions": [
+    {
+      "id": "P2-CASE-source",
+      "label": "real case-insensitive list/name/selected-path now agree",
+      "pass": true
+    },
+    {
+      "id": "P2-CASE-real-CLI-ACP",
+      "label": "headless name/path and ACP list/detail select user",
+      "pass": true
+    },
+    {
+      "id": "P2-IO-source",
+      "label": "independent scopes work despite unrelated inaccessible roots; listing remains loud",
+      "pass": true
+    },
+    {
+      "id": "P2-IO-real-tool",
+      "label": "inline generated path replays while target qwen is blocked",
+      "pass": true
+    },
+    {
+      "id": "R1-22",
+      "label": "operator-only policy and current-target check close witnessed admission",
+      "pass": true
+    },
+    {
+      "id": "R1-24",
+      "label": "operator-only policy and current-target check close witnessed admission",
+      "pass": true
+    },
+    {
+      "id": "R1-22+24",
+      "label": "operator-only policy and current-target check close witnessed admission",
+      "pass": true
+    },
+    {
+      "id": "R1-22-real-tool",
+      "label": "workspace false cannot execute denied ancestor",
+      "pass": true
+    },
+    {
+      "id": "R1-30",
+      "label": "unsafe shared ancestor refused; group-writable legitimate fixture retained",
+      "pass": true
+    },
+    {
+      "id": "R1-1-real-ACP",
+      "label": "bad workflow directory preserves supported-commands envelope and recovery",
+      "pass": true
+    }
+  ],
+  "originalAssertions": [
+    {
+      "id": "E01.1",
+      "description": "completion root-only absent before, visible after",
+      "pass": true
+    },
+    {
+      "id": "E01.2",
+      "description": "actual shared slash result user before, nearest ancestor after",
+      "pass": true
+    },
+    {
+      "id": "E01.3",
+      "description": "root-only unknown before, completed after",
+      "pass": true
+    },
+    {
+      "id": "E01.4",
+      "description": "fresh name lookup selects newly added target",
+      "pass": true
+    },
+    {
+      "id": "E01.5",
+      "description": "cached ancestor slash cannot run after trust revocation",
+      "pass": true
+    },
+    {
+      "id": "E02.1",
+      "description": "before root absent; after exact complete root/nearest/user/target markers",
+      "pass": true
+    },
+    {
+      "id": "E02.2",
+      "description": "JSON args survive the real model/tool execution chain",
+      "pass": true
+    },
+    {
+      "id": "E02.3",
+      "description": "explicit trusted ancestor path returns exact root marker",
+      "pass": true
+    },
+    {
+      "id": "E02.4",
+      "description": "outside path is refused without sentinel content leakage",
+      "pass": true
+    },
+    {
+      "id": "E02.5",
+      "description": "workflow subagent actual pwd stays at session target",
+      "pass": true
+    },
+    {
+      "id": "E02.6",
+      "description": "generated inline path remains executable",
+      "pass": true
+    },
+    {
+      "id": "E02.7",
+      "description": "denied ancestor name/path never returns root marker",
+      "pass": true
+    },
+    {
+      "id": "E02.8",
+      "description": "all real headless CLI turns settle successfully",
+      "pass": true
+    },
+    {
+      "id": "E03.1",
+      "description": "ACP list/detail use target, not different process cwd",
+      "pass": true
+    },
+    {
+      "id": "E04.1",
+      "description": "default approval first/repeat/same-bytes/new-bytes counts",
+      "pass": true
+    },
+    {
+      "id": "E04.2",
+      "description": "approval run markers reflect same bytes and changed bytes",
+      "pass": true
+    },
+    {
+      "id": "E03.2",
+      "description": "long ACP session trust changes observed on next call",
+      "pass": true
+    },
+    {
+      "id": "E04.3",
+      "description": "real TUI save writes current target and leaves ancestors unchanged",
+      "pass": true
+    },
+    {
+      "id": "E05.1",
+      "description": "real daemon two-workspace negative and target/user execution before/after",
+      "pass": true
+    }
+  ],
+  "runtimeIdentityCount": 7,
+  "allRuntimeIdentitiesMatchFinalHeadAndCli": true,
+  "realAcpEnvelope": {
+    "pass": true,
+    "blockedAvailableCommands": 51,
+    "blockedSavedWorkflows": [],
+    "recoveredRootOnly": true
+  },
+  "r30TemporaryPathRemoved": true,
+  "finalBindingPending": false,
+  "provenanceBefore": "/Users/qqqys/.codex/worktrees/62f1/qwen-code/.qwen/pr-reviews/PR-14369/repair-2026-10-18/test-engineer/postfix-final-553945bd/provenance-before.json",
+  "provenanceAfter": "/Users/qqqys/.codex/worktrees/62f1/qwen-code/.qwen/pr-reviews/PR-14369/repair-2026-10-18/test-engineer/postfix-final-553945bd/provenance-after.json",
+  "runtimeInventoryPass": true,
+  "runtimeInventory": "/Users/qqqys/.codex/worktrees/62f1/qwen-code/.qwen/pr-reviews/PR-14369/repair-2026-10-18/test-engineer/postfix-final-553945bd/runtime-inventory.json",
+  "imagePaths": [
+    "/Users/qqqys/.codex/worktrees/62f1/qwen-code/.qwen/pr-reviews/PR-14369/repair-2026-10-18/test-engineer/postfix-final-553945bd/TUI/after-list-ro-553945bd.png",
+    "/Users/qqqys/.codex/worktrees/62f1/qwen-code/.qwen/pr-reviews/PR-14369/repair-2026-10-18/test-engineer/postfix-final-553945bd/TUI/after-shared-553945bd.png",
+    "/Users/qqqys/.codex/worktrees/62f1/qwen-code/.qwen/pr-reviews/PR-14369/repair-2026-10-18/test-engineer/postfix-final-553945bd/TUI/after-root-only-553945bd.png",
+    "/Users/qqqys/.codex/worktrees/62f1/qwen-code/.qwen/pr-reviews/PR-14369/repair-2026-10-18/test-engineer/postfix-final-553945bd/TUI/after-cached-revoked-553945bd.png",
+    "/Users/qqqys/.codex/worktrees/62f1/qwen-code/.qwen/pr-reviews/PR-14369/repair-2026-10-18/test-engineer/postfix-final-553945bd/TUI-SAVE/after-save-553945bd.png"
+  ],
+  "allFiveImagesVisuallyInspected": true,
+  "runnerProcessCount": 9,
+  "allRunnerProcessesExitedZero": true,
+  "previousHead": "81886e580ac984722f69412c8ab02d40aeb292a1",
+  "previousEvidence": "/Users/qqqys/.codex/worktrees/62f1/qwen-code/.qwen/pr-reviews/PR-14369/repair-2026-10-18/test-engineer/postfix-push-head",
+  "previousReport": "/Users/qqqys/.codex/worktrees/62f1/qwen-code/.qwen/pr-reviews/PR-14369/repair-2026-10-18/test-engineer/postfix-report-81886e58.md",
+  "previousSummary": "/Users/qqqys/.codex/worktrees/62f1/qwen-code/.qwen/pr-reviews/PR-14369/repair-2026-10-18/test-engineer/postfix-summary-81886e58.json",
+  "provisionalReport": "/Users/qqqys/.codex/worktrees/62f1/qwen-code/.qwen/pr-reviews/PR-14369/repair-2026-10-18/test-engineer/postfix-report-6dcc-provisional.md",
+  "provisionalSummary": "/Users/qqqys/.codex/worktrees/62f1/qwen-code/.qwen/pr-reviews/PR-14369/repair-2026-10-18/test-engineer/postfix-summary-6dcc-provisional.json",
+  "sourceComparison": {
+    "oldHead": "81886e580ac984722f69412c8ab02d40aeb292a1",
+    "finalHead": "553945bd02dd93826acdeb40dbdc0c80baa7bb18",
+    "oldFileCount": 23,
+    "finalFileCount": 24,
+    "changedExistingEntries": [],
+    "addedManifestEntries": [
+      "packages/cli/src/acp-integration/acpAgent.worktree.test.ts"
+    ],
+    "removedManifestEntries": [],
+    "gitNameStatus": [
+      "M\tpackages/cli/src/acp-integration/acpAgent.worktree.test.ts"
+    ]
+  },
+  "limits": [
+    "Assigned five priority findings plus R1-1 consumer and original E01-E05 only; this is not a full independent disposition of all 23 PR comments",
+    "Real macOS uid502 case-insensitive filesystem only; no Windows runtime claim",
+    "R30 same-uid bounded real-filesystem admission probe; no second-uid attacker execution claim",
+    "R24 config/provider/core body-admission probe; no automatic unapproved-execution claim",
+    "Actual CLI/PTY/ACP/daemon with deterministic loopback provider; no live-provider/model-quality claim",
+    "TUI PNGs faithfully render actual PTY cell captures; not desktop screenshots",
+    "No hosted CI, PR merge, original-chat acceptance or GitHub writes claimed"
+  ]
+}

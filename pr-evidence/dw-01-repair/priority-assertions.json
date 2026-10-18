@@ -1,0 +1,58 @@
+{
+  "capturedAt": "2026-10-18T06:28:53.804Z",
+  "baseline": "/Users/qqqys/.codex/worktrees/62f1/qwen-code/.qwen/pr-reviews/PR-14369/repair-2026-10-18/test-engineer",
+  "after": "/Users/qqqys/.codex/worktrees/62f1/qwen-code/.qwen/pr-reviews/PR-14369/repair-2026-10-18/test-engineer/postfix-final-553945bd",
+  "pass": true,
+  "checks": [
+    {
+      "id": "P2-CASE-source",
+      "label": "real case-insensitive list/name/selected-path now agree",
+      "pass": true
+    },
+    {
+      "id": "P2-CASE-real-CLI-ACP",
+      "label": "headless name/path and ACP list/detail select user",
+      "pass": true
+    },
+    {
+      "id": "P2-IO-source",
+      "label": "independent scopes work despite unrelated inaccessible roots; listing remains loud",
+      "pass": true
+    },
+    {
+      "id": "P2-IO-real-tool",
+      "label": "inline generated path replays while target qwen is blocked",
+      "pass": true
+    },
+    {
+      "id": "R1-22",
+      "label": "operator-only policy and current-target check close witnessed admission",
+      "pass": true
+    },
+    {
+      "id": "R1-24",
+      "label": "operator-only policy and current-target check close witnessed admission",
+      "pass": true
+    },
+    {
+      "id": "R1-22+24",
+      "label": "operator-only policy and current-target check close witnessed admission",
+      "pass": true
+    },
+    {
+      "id": "R1-22-real-tool",
+      "label": "workspace false cannot execute denied ancestor",
+      "pass": true
+    },
+    {
+      "id": "R1-30",
+      "label": "unsafe shared ancestor refused; group-writable legitimate fixture retained",
+      "pass": true
+    },
+    {
+      "id": "R1-1-real-ACP",
+      "label": "bad workflow directory preserves supported-commands envelope and recovery",
+      "pass": true
+    }
+  ]
+}

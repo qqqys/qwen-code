@@ -1,0 +1,32 @@
+{
+  "verifiedAt": "2026-10-18T06:29:34.388279+00:00",
+  "head": "553945bd02dd93826acdeb40dbdc0c80baa7bb18",
+  "expectedHead": "553945bd02dd93826acdeb40dbdc0c80baa7bb18",
+  "runtimeAggregate": "af82a7db968b3bd1033b123e1c0100e8323b69a410dac23f391e861bbda63f61",
+  "aggregateOrder": "manifest entry order",
+  "globalCodepointSortedAggregate": "af82a7db968b3bd1033b123e1c0100e8323b69a410dac23f391e861bbda63f61",
+  "expectedRuntimeAggregate": "af82a7db968b3bd1033b123e1c0100e8323b69a410dac23f391e861bbda63f61",
+  "checks": {
+    "source": {
+      "count": 24,
+      "mismatches": [],
+      "pass": true
+    },
+    "runtime": {
+      "count": 1446,
+      "mismatches": [],
+      "pass": true
+    },
+    "before-artifacts.json": {
+      "count": 682,
+      "mismatches": [],
+      "pass": true
+    },
+    "final-artifacts.json": {
+      "count": 683,
+      "mismatches": [],
+      "pass": true
+    }
+  },
+  "pass": true
+}

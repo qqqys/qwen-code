@@ -1,0 +1,139 @@
+{
+  "source": "/Users/qqqys/.codex/worktrees/62f1/qwen-code",
+  "capturedAt": "2026-10-18T06:28:19.209Z",
+  "scenarios": {
+    "R1-22": {
+      "repo": "/Users/qqqys/.codex/worktrees/62f1/qwen-code/.qwen/pr-reviews/PR-14369/repair-2026-10-18/test-engineer/postfix-final-553945bd/fixtures-policy/R1-22/repo",
+      "target": "/Users/qqqys/.codex/worktrees/62f1/qwen-code/.qwen/pr-reviews/PR-14369/repair-2026-10-18/test-engineer/postfix-final-553945bd/fixtures-policy/R1-22/repo/vendor-drop",
+      "isTrusted": true,
+      "operatorFolderTrust": true,
+      "workspaceFolderTrust": false,
+      "mergedFolderTrust": false,
+      "operatorOnlyFolderTrust": true,
+      "providerAnswers": [
+        false
+      ],
+      "configFolderTrustEnabled": false,
+      "configTrusted": true,
+      "providerInstalled": true,
+      "list": [],
+      "resolved": {
+        "ok": false,
+        "error": "Error: workflow('deploy'): no workflow with that name. Available: (none)."
+      }
+    },
+    "R1-24": {
+      "repo": "/Users/qqqys/.codex/worktrees/62f1/qwen-code/.qwen/pr-reviews/PR-14369/repair-2026-10-18/test-engineer/postfix-final-553945bd/fixtures-policy/R1-24/repo",
+      "target": "/Users/qqqys/.codex/worktrees/62f1/qwen-code/.qwen/pr-reviews/PR-14369/repair-2026-10-18/test-engineer/postfix-final-553945bd/fixtures-policy/R1-24/repo/vendor-drop",
+      "isTrusted": false,
+      "operatorFolderTrust": true,
+      "workspaceFolderTrust": false,
+      "mergedFolderTrust": true,
+      "operatorOnlyFolderTrust": true,
+      "providerAnswers": [
+        false
+      ],
+      "configFolderTrustEnabled": true,
+      "configTrusted": false,
+      "providerInstalled": true,
+      "list": [],
+      "resolved": {
+        "ok": false,
+        "error": "Error: workflow('deploy'): no workflow with that name. Available: (none)."
+      }
+    },
+    "R1-22+24": {
+      "repo": "/Users/qqqys/.codex/worktrees/62f1/qwen-code/.qwen/pr-reviews/PR-14369/repair-2026-10-18/test-engineer/postfix-final-553945bd/fixtures-policy/R1-22+24/repo",
+      "target": "/Users/qqqys/.codex/worktrees/62f1/qwen-code/.qwen/pr-reviews/PR-14369/repair-2026-10-18/test-engineer/postfix-final-553945bd/fixtures-policy/R1-22+24/repo/vendor-drop",
+      "isTrusted": false,
+      "operatorFolderTrust": true,
+      "workspaceFolderTrust": false,
+      "mergedFolderTrust": true,
+      "operatorOnlyFolderTrust": true,
+      "providerAnswers": [
+        false
+      ],
+      "configFolderTrustEnabled": true,
+      "configTrusted": false,
+      "providerInstalled": true,
+      "list": [],
+      "resolved": {
+        "ok": false,
+        "error": "Error: workflow('deploy'): no workflow with that name. Available: (none)."
+      }
+    },
+    "R1-30": {
+      "shared": "/var/tmp/dw01-r30-I8R3CI",
+      "target": "/var/tmp/dw01-r30-I8R3CI/scratch/project",
+      "sharedMode": 493,
+      "qwenMode": 493,
+      "noCrossUidClaim": true,
+      "armA": {
+        "candidateAncestors": [
+          "/private/var/tmp/dw01-r30-I8R3CI/scratch",
+          "/private/var/tmp/dw01-r30-I8R3CI"
+        ],
+        "ancestors": [
+          "/private/var/tmp/dw01-r30-I8R3CI/scratch"
+        ],
+        "decisions": [
+          true,
+          false
+        ],
+        "list": [],
+        "resolved": {
+          "ok": false,
+          "error": "Error: workflow('evil'): no workflow with that name. Available: (none)."
+        }
+      },
+      "armSafeGroup": {
+        "decisions": [
+          true,
+          true
+        ],
+        "list": [
+          {
+            "name": "evil",
+            "scriptPath": "/private/var/tmp/dw01-r30-I8R3CI/.qwen/workflows/evil.js",
+            "source": "project"
+          }
+        ],
+        "resolved": {
+          "ok": true,
+          "value": {
+            "name": "evil",
+            "scriptPath": "/private/var/tmp/dw01-r30-I8R3CI/.qwen/workflows/evil.js",
+            "script": "return 'ATTACKER_SCRIPT_BODY_RAN';",
+            "savedWorkflowName": "evil",
+            "source": "project"
+          }
+        }
+      },
+      "armWorkflowWorldWritable": {
+        "decisions": [
+          true,
+          false
+        ],
+        "list": [],
+        "resolved": {
+          "ok": false,
+          "error": "Error: workflow('evil'): no workflow with that name. Available: (none)."
+        }
+      },
+      "armD": {
+        "list": [],
+        "resolved": {
+          "ok": false,
+          "error": "Error: workflow('evil'): no workflow with that name. Available: (none)."
+        }
+      },
+      "armB": {
+        "ancestors": [],
+        "resolved": {
+          "ok": false,
+          "error": "Error: workflow('evil'): no workflow with that name. Available: (none)."
+        }
+      }
+    }
+  }
+}
