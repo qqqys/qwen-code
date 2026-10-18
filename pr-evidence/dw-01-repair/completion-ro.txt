@@ -1,0 +1,40 @@
+
+   ▄▄▄▄▄▄  ▄▄     ▄▄ ▄▄▄▄▄▄▄ ▄▄▄    ▄▄   ┌──────────────────────────────────────────────────────────┐
+  ██╔═══██╗██║    ██║██╔════╝████╗  ██║  │ >_ Qwen Code (v0.25.2)                                   │
+  ██║   ██║██║ █╗ ██║█████╗  ██╔██╗ ██║  │                                                          │
+  ██║▄▄ ██║██║███╗██║██╔══╝  ██║╚██╗██║  │ API Key | mock-model (/model to change)                  │
+  ╚██████╔╝╚███╔███╔╝███████╗██║ ╚████║  │ /Users/.../postfix-push-head/TUI/repo/packages/a         │
+   ╚══▀▀═╝  ╚══╝╚══╝ ╚══════╝╚═╝  ╚═══╝  └──────────────────────────────────────────────────────────┘
+
+  Tips: Add a QWEN.md file to give Qwen Code persistent project context.
+  ●︎ Extensions changed on disk. Run /reload-plugins to apply updates.
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+* /ro
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  > root-only [json-args]                                                  Run the "root-only" saved workflow (project)
+    rewind (alias: rollback)                                               Rewind conversation to a previous turn
+    reload-plugins                                                         Reload extension changes from disk
+    restore                                                                Restore a tool call. This will reset the conversation and file…
+    user-only [json-args]                                                  Run the "user-only" saved workflow (user)
+    browser-use [Skill]                                                    Control the user's Chrome through the existing persistent Node…
+    approval-mode <mode>                                                   View or change the approval mode for tool usage
+    curator [status|run [--dry-run]|pin <directory>|unpin <directory>|re…  Maintain project auto-skills based on recent use.
+  ▼
+  (1/15)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

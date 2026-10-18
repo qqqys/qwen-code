@@ -1,0 +1,156 @@
+{
+  "source": "/Users/qqqys/.codex/worktrees/62f1/qwen-code",
+  "capturedAt": "2026-10-18T06:11:40.664Z",
+  "uid": 502,
+  "cases": {
+    "P2_CASE": {
+      "caseInsensitive": true,
+      "physicalEntries": [
+        "Audit.js"
+      ],
+      "list": [
+        {
+          "name": "audit",
+          "scriptPath": "/Users/qqqys/.codex/worktrees/62f1/qwen-code/.qwen/pr-reviews/PR-14369/repair-2026-10-18/test-engineer/postfix-push-head/fixtures-core/user/workflows/audit.js",
+          "source": "user"
+        }
+      ],
+      "name": {
+        "ok": true,
+        "value": {
+          "name": "audit",
+          "scriptPath": "/Users/qqqys/.codex/worktrees/62f1/qwen-code/.qwen/pr-reviews/PR-14369/repair-2026-10-18/test-engineer/postfix-push-head/fixtures-core/user/workflows/audit.js",
+          "script": "return 'DW01_CASE_USER_B73D';\n",
+          "savedWorkflowName": "audit",
+          "source": "user"
+        }
+      },
+      "listedPath": {
+        "ok": true,
+        "value": {
+          "name": "audit",
+          "scriptPath": "/Users/qqqys/.codex/worktrees/62f1/qwen-code/.qwen/pr-reviews/PR-14369/repair-2026-10-18/test-engineer/postfix-push-head/fixtures-core/user/workflows/audit.js",
+          "script": "return 'DW01_CASE_USER_B73D';\n",
+          "savedWorkflowName": "audit",
+          "source": "user"
+        }
+      }
+    },
+    "P2_IO": {
+      "controls": {
+        "user": {
+          "ok": true,
+          "value": {
+            "name": "user",
+            "scriptPath": "/Users/qqqys/.codex/worktrees/62f1/qwen-code/.qwen/pr-reviews/PR-14369/repair-2026-10-18/test-engineer/postfix-push-head/fixtures-core/io-user/workflows/user.js",
+            "script": "return 'IO_USER';",
+            "savedWorkflowName": "user",
+            "source": "user"
+          }
+        },
+        "generated": {
+          "ok": true,
+          "value": {
+            "name": "wf_a123",
+            "scriptPath": "/Users/qqqys/.codex/worktrees/62f1/qwen-code/.qwen/pr-reviews/PR-14369/repair-2026-10-18/test-engineer/postfix-push-head/fixtures-core/io/generated/inline/wf_a123.js",
+            "script": "return 'IO_GENERATED';"
+          }
+        },
+        "extensionPath": {
+          "ok": true,
+          "value": {
+            "name": "extension",
+            "scriptPath": "/Users/qqqys/.codex/worktrees/62f1/qwen-code/.qwen/pr-reviews/PR-14369/repair-2026-10-18/test-engineer/postfix-push-head/fixtures-core/io/extension/extension.js",
+            "script": "return 'IO_EXTENSION';",
+            "savedWorkflowName": "probe:extension",
+            "source": "extension"
+          }
+        },
+        "extensionName": {
+          "ok": true,
+          "value": {
+            "name": "probe:extension",
+            "scriptPath": "/Users/qqqys/.codex/worktrees/62f1/qwen-code/.qwen/pr-reviews/PR-14369/repair-2026-10-18/test-engineer/postfix-push-head/fixtures-core/io/extension/extension.js",
+            "script": "return 'IO_EXTENSION';",
+            "savedWorkflowName": "probe:extension",
+            "source": "extension"
+          }
+        }
+      },
+      "projectBlocked": {
+        "list": {
+          "ok": false,
+          "error": "Error: workflow directory '/Users/qqqys/.codex/worktrees/62f1/qwen-code/.qwen/pr-reviews/PR-14369/repair-2026-10-18/test-engineer/postfix-push-head/fixtures-core/io/target/.qwen/workflows': Error: EACCES: permission denied, lstat '/Users/qqqys/.codex/worktrees/62f1/qwen-code/.qwen/pr-reviews/PR-14369/repair-2026-10-18/test-engineer/postfix-push-head/fixtures-core/io/target/.qwen/workflows'"
+        },
+        "user": {
+          "ok": true,
+          "value": {
+            "name": "user",
+            "scriptPath": "/Users/qqqys/.codex/worktrees/62f1/qwen-code/.qwen/pr-reviews/PR-14369/repair-2026-10-18/test-engineer/postfix-push-head/fixtures-core/io-user/workflows/user.js",
+            "script": "return 'IO_USER';",
+            "savedWorkflowName": "user",
+            "source": "user"
+          }
+        },
+        "generated": {
+          "ok": true,
+          "value": {
+            "name": "wf_a123",
+            "scriptPath": "/Users/qqqys/.codex/worktrees/62f1/qwen-code/.qwen/pr-reviews/PR-14369/repair-2026-10-18/test-engineer/postfix-push-head/fixtures-core/io/generated/inline/wf_a123.js",
+            "script": "return 'IO_GENERATED';"
+          }
+        },
+        "extensionPath": {
+          "ok": true,
+          "value": {
+            "name": "extension",
+            "scriptPath": "/Users/qqqys/.codex/worktrees/62f1/qwen-code/.qwen/pr-reviews/PR-14369/repair-2026-10-18/test-engineer/postfix-push-head/fixtures-core/io/extension/extension.js",
+            "script": "return 'IO_EXTENSION';",
+            "savedWorkflowName": "probe:extension",
+            "source": "extension"
+          }
+        },
+        "extensionName": {
+          "ok": true,
+          "value": {
+            "name": "probe:extension",
+            "scriptPath": "/Users/qqqys/.codex/worktrees/62f1/qwen-code/.qwen/pr-reviews/PR-14369/repair-2026-10-18/test-engineer/postfix-push-head/fixtures-core/io/extension/extension.js",
+            "script": "return 'IO_EXTENSION';",
+            "savedWorkflowName": "probe:extension",
+            "source": "extension"
+          }
+        }
+      },
+      "userBlocked": {
+        "generated": {
+          "ok": true,
+          "value": {
+            "name": "wf_a123",
+            "scriptPath": "/Users/qqqys/.codex/worktrees/62f1/qwen-code/.qwen/pr-reviews/PR-14369/repair-2026-10-18/test-engineer/postfix-push-head/fixtures-core/io/generated/inline/wf_a123.js",
+            "script": "return 'IO_GENERATED';"
+          }
+        },
+        "extensionName": {
+          "ok": true,
+          "value": {
+            "name": "probe:extension",
+            "scriptPath": "/Users/qqqys/.codex/worktrees/62f1/qwen-code/.qwen/pr-reviews/PR-14369/repair-2026-10-18/test-engineer/postfix-push-head/fixtures-core/io/extension/extension.js",
+            "script": "return 'IO_EXTENSION';",
+            "savedWorkflowName": "probe:extension",
+            "source": "extension"
+          }
+        },
+        "projectControl": {
+          "ok": true,
+          "value": {
+            "name": "local",
+            "scriptPath": "/Users/qqqys/.codex/worktrees/62f1/qwen-code/.qwen/pr-reviews/PR-14369/repair-2026-10-18/test-engineer/postfix-push-head/fixtures-core/io/target/.qwen/workflows/local.js",
+            "script": "return 'IO_PROJECT';",
+            "savedWorkflowName": "local",
+            "source": "project"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "head": "81886e580ac984722f69412c8ab02d40aeb292a1",
+  "upstream": "193e3652900c598f568e8444286a7a09549921f1",
+  "recordedAt": "2026-10-18T06:15:45.606817+00:00",
+  "localStatus": "PASS",
+  "sourceFiles": 23,
+  "coreTests": {
+    "passed": 403,
+    "head": "6dcc44d7ff53b9fd5afb8f9c73ebb10c58f08c7b",
+    "filesUnchangedToFinal": true
+  },
+  "cliTests": {
+    "passed": 1944,
+    "head": "3e990cba7f4752cfa3875b7efbc6fad4d8c7693b",
+    "filesUnchangedToFinal": true
+  },
+  "ciMetaTests": {
+    "passed": 63,
+    "skipped": 2,
+    "head": "81886e580ac984722f69412c8ab02d40aeb292a1"
+  },
+  "integrationTests": {
+    "uniquePassed": 14,
+    "newFeatureCasesRepeatedAtFinal": 5
+  },
+  "independentE2E": {
+    "passed": 29,
+    "regressionAssertions": 10,
+    "originalAssertions": 19,
+    "head": "81886e580ac984722f69412c8ab02d40aeb292a1"
+  },
+  "fullBuild": {
+    "passed": true,
+    "head": "6dcc44d7ff53b9fd5afb8f9c73ebb10c58f08c7b",
+    "heapMiB": 6144
+  },
+  "fullTypecheck": {
+    "passed": true,
+    "head": "6dcc44d7ff53b9fd5afb8f9c73ebb10c58f08c7b"
+  },
+  "finalAffectedCliBuild": {
+    "passed": true,
+    "head": "3e990cba7f4752cfa3875b7efbc6fad4d8c7693b"
+  },
+  "lint": "PASS",
+  "format": "PASS",
+  "sourceFastPath": "PASS",
+  "bundleClosure": "PASS",
+  "runtimeFiles": 1446,
+  "cliSha256": "0bcd647c1940ef33c90d666c7fd1a47f2c9fcf2ebddfbc3680f75e3d08465584",
+  "runtimeAggregateSha256": "ac4286890c8fbab861cc150a1e7d55aab52e828a795180b16cbf3af2e577f2fb",
+  "independentCodeReview": "no confirmed retained defect; final source equivalence verified",
+  "hostedCI": "not yet submitted at this local record",
+  "scope": "macOS/Node24; deterministic loopback mock provider; no Windows/Linux filesystem E2E or Windows ACL claim",
+  "validationInheritance": "6dcc to 3e990 changes only ACP test mock; rebuilt CLI and reran all 8 affected suites. Final merge changes none of the 23 PR files, affected CI meta-tests rerun. Final bundle, 5 integration cases and all 29 independent runtime assertions bind final HEAD."
+}

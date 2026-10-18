@@ -1,0 +1,40 @@
+
+    ```json
+    {
+      "runId": "wf_7ccf168742411ccd",
+      "meta": {
+        "name": "shared",
+        "description": "DW01 DW01_MARK_PACKAGES"
+      },
+      "phases": [],
+      "logs": [],
+      "result": "DW01_MARK_PACKAGES"
+    }
+    ```
+
+  ◆︎ DW01_NO_ACTION
+
+  > /root-only
+  ●︎ Workflow "root-only" completed. Run ID: wf_882aaebf315293d2
+    Result: DW01_MARK_ROOT_ONLY
+  ✓ Workflow Run saved workflow (root-only.js)
+    ```json
+    {
+      "runId": "wf_882aaebf315293d2",
+      "meta": {
+        "name": "root-only",
+        "description": "DW01 DW01_MARK_ROOT_ONLY"
+      },
+      "phases": [],
+      "logs": [],
+      "result": "DW01_MARK_ROOT_ONLY"
+    }
+    ```
+
+  ◆︎ DW01_NO_ACTION
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+*   Type your message or @path/to/file
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ➜ a · git:(master) · mock-model
+  YOLO mode (shift + tab to cycle) · 2 tasks done

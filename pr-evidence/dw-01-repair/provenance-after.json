@@ -1,0 +1,32 @@
+{
+  "verifiedAt": "2026-10-18T06:12:59.881476+00:00",
+  "head": "81886e580ac984722f69412c8ab02d40aeb292a1",
+  "expectedHead": "81886e580ac984722f69412c8ab02d40aeb292a1",
+  "runtimeAggregate": "ac4286890c8fbab861cc150a1e7d55aab52e828a795180b16cbf3af2e577f2fb",
+  "aggregateOrder": "manifest entry order",
+  "globalCodepointSortedAggregate": "ac4286890c8fbab861cc150a1e7d55aab52e828a795180b16cbf3af2e577f2fb",
+  "expectedRuntimeAggregate": "ac4286890c8fbab861cc150a1e7d55aab52e828a795180b16cbf3af2e577f2fb",
+  "checks": {
+    "source": {
+      "count": 23,
+      "mismatches": [],
+      "pass": true
+    },
+    "runtime": {
+      "count": 1446,
+      "mismatches": [],
+      "pass": true
+    },
+    "before-artifacts.json": {
+      "count": 682,
+      "mismatches": [],
+      "pass": true
+    },
+    "final-artifacts.json": {
+      "count": 683,
+      "mismatches": [],
+      "pass": true
+    }
+  },
+  "pass": true
+}

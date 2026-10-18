@@ -1,0 +1,40 @@
+        "description": "DW01 DW01_MARK_TARGET"
+      },
+      "phases": [],
+      "logs": [],
+      "result": "DW01_MARK_TARGET"
+    }
+    ```
+
+  ◆︎ DW01_DONE [{"type":"text","text":"DW01_MARK_TARGET\n--- workflow run ---\nrunId: wf_a0755fb8b9b8b4e0\nscript:
+    /Users/qqqys/.codex/worktrees/62f1/qwen-code/.qwen/pr-reviews/PR-14369/repair-2026-10-18/test-engineer/postfix-push-head/TUI/repo/pac
+    kages/a/.qwen/workflows/shared.js\njournal: /Users/qqqys/.codex/worktrees/62f1/qwen-code/.qwen/pr-reviews/PR-14369/repair-2026-10-18/
+    test-engineer/postfix-push-head/TUI/runtime/projects/-Users-qqqys--codex-worktrees-62f1-qwen-code--qwen-pr-reviews-PR-14369-repair-20
+    26-10-18-test-engineer-postfix-push-head-TUI-repo-packages-a/workflows/wf_a0755fb8b9b8b4e0/journal.jsonl\nagents: 0 dispatched · 0
+    completed · 0 cached · 0 failed · 0 cancelled\ntokens: 0 spent (no cap)\nresume: Workflow({ scriptPath:
+    \"/Users/qqqys/.codex/worktrees/62f1/qwen-code/.qwen/pr-reviews/PR-14369/repair-2026-10-18/test-engineer/postfix-push-head/TUI/repo/p
+    ackages/a/.qwen/workflows/shared.js\", resumeFromRunId: \"wf_a0755fb8b9b8b4e0\" }) — this reads the saved workflow; copy it before
+    making a run-specific change; the journal replays the longest unchanged prefix of agent() calls, and the first changed call onward
+    runs live."}]
+
+  > /shared
+  x Workflow {"scriptPath":"/Users/qqqys/.codex/worktrees/62f1/qwen-code/.qwen/pr-reviews/PR-14369/repair-2026-10-18/test-engineer/postfix
+    -push-head/TUI/repo/packages/.qwen/workflows/shared.js"}
+    workflow({scriptPath:
+    '/Users/qqqys/.codex/worktrees/62f1/qwen-code/.qwen/pr-reviews/PR-14369/repair-2026-10-18/test-engineer/postfix-push-head/TUI/repo/pac
+    kages/.qwen/workflows/shared.js'}): refusing to load a workflow file outside the workflow script roots (checked:
+    /Users/qqqys/.codex/worktrees/62f1/qwen-code/.qwen/pr-reviews/PR-14369/repair-2026-10-18/test-engineer/postfix-push-head/TUI/repo/pack
+    ages/a/.qwen/workflows,
+    /Users/qqqys/.codex/worktrees/62f1/qwen-code/.qwen/pr-reviews/PR-14369/repair-2026-10-18/test-engineer/postfix-push-head/TUI/home/work
+    flows,
+    /Users/qqqys/.codex/worktrees/62f1/qwen-code/.qwen/pr-reviews/PR-14369/repair-2026-10-18/test-engineer/postfix-push-head/TUI/runtime/p
+    rojects/-Users-qqqys--codex-worktrees-62f1-qwen-code--qwen-pr-reviews-PR-14369-repair-2026-10-18-test-engineer-postfix-push-head-TUI-r
+    epo-packages-a/workflows/generated):
+    '/Users/qqqys/.codex/worktrees/62f1/qwen-code/.qwen/pr-reviews/PR-14369/repair-2026-10-18/test-engineer/postfix-push-head/TUI/repo/pac
+    kages/.qwen/workflows/shared.js'.
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+*   Type your message or @path/to/file
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ➜ a · git:(master) · mock-model
+  YOLO mode (shift + tab to cycle) · 3 tasks done
