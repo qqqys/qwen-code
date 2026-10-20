@@ -18,3 +18,17 @@ Source: `0f3f7df2a41864d42668f8be0a2a3b59a92c4498`, including repair `044761bd22
 - `generated-ui-settings-excluded.png`: existing settings-exclusions Playwright scenario, using actual daemon settings descriptors with the source Web Shell and mock browser sessions; excluding all public settings IDs leaves the expected empty settings state. This is separate from the built-daemon Generated UI scenario.
 
 These three images were visually inspected. The two existing settings/collapsed-groups Playwright files passed all three cases with one worker and zero retries. Evidence is local and fixture-based; no real-model, Linux/Windows, native Tauri, hosted-CI or production claim is implied.
+
+## Normal MCP Refresh acceptance (second review repair)
+
+Fixed source: `dae7b3acc479c6e05a0bb189c06e6957d85cadcf`; repair `b9c38d378c513885bd10244452d4f1b73ef4e0d9`; integrated upstream `2b5c4deadb9e9dd0d9d740a52ae42f28ad14bf92`. macOS / Node 22.17.0 / actual built CLI, daemon, ACP, owner Config, bundled MCP and real Chromium.
+
+The previous section's silent MCP-only reload limitation was independently reproduced as a real remaining defect at source `0f3f7df2`. This repair now verifies that normal public `workspaceByCwd(...).reloadRuntimeMcp()` alone refreshes the existing page's owner capability, without a second workspace reload, reattach or model turn. The probe invokes the same API used by the UI action; it does not click the button.
+
+All images use isolated homes/workspaces, a deterministic loopback model fixture, default approval mode and only the exact fixture-tool allow rule. The same unchanged probe first failed on the original head and passed on the fixed head. Both owner readbacks are policy-disabled after restricting mcp.allowed to an empty list.
+
+- `mcp-refresh-original-still-active.png`: original head after normal MCP Refresh and a 20-second observation; the restricted same-page view still runs and rate 40 to 50 still yields 200 requests/s.
+- `mcp-refresh-fixed-before.png`: fixed head, before restriction; an actual rate 25 to 40 input produces capacity 100 to 160 requests/s.
+- `mcp-refresh-fixed-after.png`: fixed head after restriction and one normal MCP Refresh; the page independently fetches disabled owner context, all three nested iframes and the MCP App are removed, and the readable summary/unavailable note remain after a 20-second observation. No navigation, reattach, second reload, config-disable control or additional model turn was supplied.
+
+The three images were visually inspected. Browser page errors and outside requests were empty. One Worker creation occurred before restriction and none afterward; active Worker count was not directly measured. This evidence is source-specific local runtime validation, not real-model quality, another operating system, native Tauri, hosted CI or production proof.
